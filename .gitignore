@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.so
+*.o
+.pytest_cache/
+build/
+*.ncu-rep
+*.nsys-rep
+*.sqlite
+results/*.log
+.venv/

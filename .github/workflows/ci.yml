@@ -1,0 +1,21 @@
+# CI: syntax/compile sanity on a CPU runner. GPU correctness + benchmarks run
+# locally on Jetson Thor (no public GPU runner with sm_110 + CUDA 13).
+name: ci
+on: [push, pull_request]
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Byte-compile Python
+        run: python -m compileall -q bench vla tests kernels
+      - name: Lint (non-blocking)
+        run: |
+          pip install ruff
+          ruff check . || true
+      - name: Note
+        run: echo "GPU tests (pytest tests/) run on the Jetson Thor dev box."
