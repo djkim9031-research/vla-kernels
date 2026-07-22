@@ -39,8 +39,18 @@ def cuda_time_ms(fn, iters: int, warmup: int = 25) -> float:
 def bench_softmax(args):
     from kernels.softmax import softmax, VERSIONS
 
+    # library baselines (cuDNN softmax, CUB-primitive softmax); skip gracefully
+    baselines = {}
+    try:
+        from kernels.softmax import softmax_cudnn, softmax_cub
+        baselines = {"cudnn": softmax_cudnn, "cub": softmax_cub}
+    except Exception as e:  # missing cudnn wheel / CCCL headers
+        print(f"note: library baselines unavailable ({e})")
+
     # softmax reads x and writes y once => 2 * numel * itemsize bytes (lower bound)
     rows_cols = [(1024, 128), (2048, 512), (512, 2048), (256, 4096), (64, 16384)]
+    variants = {**{v: (lambda x, v=v: softmax(x, v)) for v in VERSIONS},
+                **{n: (lambda x, f=f: f(x)) for n, f in baselines.items()}}
     rows = []
     for dt_name in args.dtypes.split(","):
         dt = DTYPES[dt_name]
@@ -52,17 +62,17 @@ def bench_softmax(args):
             # torch baseline
             t_torch = cuda_time_ms(lambda: torch.softmax(x, dim=-1), args.iters)
 
-            for v in VERSIONS:
-                out = softmax(x, v)
+            for name, fn in variants.items():
+                out = fn(x)
                 max_err = (out.float() - ref.float()).abs().max().item()
-                t = cuda_time_ms(lambda: softmax(x, v), args.iters)
+                t = cuda_time_ms(lambda: fn(x), args.iters)
                 gbps = bytes_moved / (t * 1e-3) / 1e9
-                row = dict(op="softmax", dtype=dt_name, rows=R, cols=C, version=v,
+                row = dict(op="softmax", dtype=dt_name, rows=R, cols=C, version=name,
                            ms=round(t, 5), gbps=round(gbps, 1),
                            speedup_vs_torch=round(t_torch / t, 3),
                            max_abs_err=f"{max_err:.2e}")
                 rows.append(row)
-                print(f"{dt_name} [{R:>5}x{C:<6}] {v}: {t:8.4f} ms  "
+                print(f"{dt_name} [{R:>5}x{C:<6}] {name:>5}: {t:8.4f} ms  "
                       f"{gbps:7.1f} GB/s  x{row['speedup_vs_torch']:<5} torch={t_torch:.4f}ms  err={max_err:.1e}")
     return rows
 

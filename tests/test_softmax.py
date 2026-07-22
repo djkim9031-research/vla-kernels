@@ -29,6 +29,28 @@ def test_matches_torch(version, dtype, shape):
     torch.testing.assert_close(out, ref, rtol=rtol, atol=atol)
 
 
+def _baselines():
+    try:
+        from kernels.softmax import softmax_cudnn, softmax_cub
+        return {"cudnn": softmax_cudnn, "cub": softmax_cub}
+    except Exception:
+        return {}
+
+
+@pytest.mark.parametrize("name", list(_baselines()) or ["unavailable"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
+@pytest.mark.parametrize("shape", SHAPES)
+def test_baselines_match_torch(name, dtype, shape):
+    fns = _baselines()
+    if name not in fns:
+        pytest.skip("cuDNN/CUB baselines unavailable")
+    torch.manual_seed(0)
+    x = torch.randn(*shape, device="cuda", dtype=dtype)
+    ref = torch.softmax(x.float(), dim=-1).to(dtype)
+    rtol, atol = TOL[dtype]
+    torch.testing.assert_close(fns[name](x), ref, rtol=rtol, atol=atol)
+
+
 @pytest.mark.parametrize("version", list(VERSIONS))
 def test_extreme_values_are_stable(version):
     # large magnitudes must not overflow (safe/online softmax)

@@ -1,47 +1,70 @@
 #!/usr/bin/env python3
 """Classify Nsight Compute kernels as compute / bandwidth / latency-bound.
 
-Parses an `ncu --csv` export (the wide "raw" layout) and applies simple,
-tunable thresholds on the standard throughput metrics. Generic — no project-
-specific scoring.
+Parses an `ncu --csv` export (long format: one row per kernel-metric pair,
+"Metric Name" / "Metric Value" columns) and applies tunable thresholds on the
+standard Speed-of-Light throughput metrics.
 
 Usage:
-    sudo ncu --set full --csv -o results/softmax_ncu python3 bench/bench_kernel.py --op softmax --once
-    python3 bench/roofline.py results/softmax_ncu.csv
+    sudo ncu --set full -k "regex:softmax" --csv python3 ... > results/ncu.csv
+    python3 bench/roofline.py results/ncu.csv
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
 
-# metric name -> the columns ncu may emit it under (varies by version)
-METRIC_ALIASES = {
-    "sm_pct": ["Compute (SM) Throughput", "sm__throughput.avg.pct_of_peak_sustained_elapsed"],
-    "dram_pct": ["Memory Throughput", "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed"],
-    "l1_hit": ["L1/TEX Hit Rate", "l1tex__t_sector_hit_rate.pct"],
-    "l2_hit": ["L2 Hit Rate", "lts__t_sector_hit_rate.pct"],
-    "duration": ["Duration", "gpu__time_duration.sum"],
+# Metric Name -> short key (values are % unless noted)
+METRICS = {
+    "Compute (SM) Throughput": "sm_pct",
+    "Memory Throughput": "mem_pct",          # SOL max over memory pipelines
+    "DRAM Throughput": "dram_pct",           # may be absent on Tegra iGPU
+    "L1/TEX Hit Rate": "l1_hit",
+    "L2 Hit Rate": "l2_hit",
+    "Achieved Occupancy": "occupancy",
+    "Duration": "duration_ns",               # ns
 }
 
 
-def _find(headers, names):
-    for n in names:
-        if n in headers:
-            return n
-    return None
-
-
-def classify(sm, dram, hi, lo):
-    if sm is None or dram is None:
+def classify(sm, mem, hi, lo):
+    if sm is None or mem is None:
         return "unknown"
-    if sm >= hi and sm >= dram:
+    if sm >= hi and sm >= mem:
         return "compute-bound"
-    if dram >= hi and dram > sm:
+    if mem >= hi and mem > sm:
         return "bandwidth-bound"
-    if sm < lo and dram < lo:
+    if sm < lo and mem < lo:
         return "latency/occupancy-bound"
     return "balanced"
+
+
+def parse(path):
+    """Return {(launch_id, kernel_name): {key: float}} preserving launch order."""
+    with open(path, newline="") as f:
+        # strip ncu preamble (==PROF== / ==WARNING== lines) before the header
+        lines = [ln for ln in f if not ln.startswith(("==", "\x00"))]
+    kernels: dict = {}
+    for row in csv.DictReader(io.StringIO("".join(lines))):
+        name = (row.get("Kernel Name") or "?").strip()
+        kid = row.get("ID", "?")
+        metric = (row.get("Metric Name") or "").strip()
+        if metric not in METRICS:
+            continue
+        raw = (row.get("Metric Value") or "").replace(",", "").strip()
+        try:
+            val = float(raw)
+        except ValueError:
+            continue
+        kernels.setdefault((kid, name), {})[METRICS[metric]] = val
+    return kernels
+
+
+def short(name: str, width: int) -> str:
+    # "void <unnamed>::softmax_v3<float>(const T1 *, T1 *, int, int)" -> "softmax_v3<float>"
+    n = name.split("::")[-1].split("(")[0].strip()
+    return (n or name)[:width]
 
 
 def main():
@@ -51,36 +74,26 @@ def main():
     ap.add_argument("--lo", type=float, default=20.0, help="low %% of peak threshold")
     args = ap.parse_args()
 
-    with open(args.csv, newline="") as f:
-        # ncu csv often has a preamble; find the header row containing a known column
-        rows = list(csv.reader(f))
-    hdr_idx = next((i for i, r in enumerate(rows)
-                    if any(c in r for c in METRIC_ALIASES["sm_pct"])), None)
-    if hdr_idx is None:
-        sys.exit("could not locate metric header row in ncu csv")
-    headers = rows[hdr_idx]
-    cols = {k: _find(headers, v) for k, v in METRIC_ALIASES.items()}
-    kname = _find(headers, ["Kernel Name", "Demangled Name"])
+    kernels = parse(args.csv)
+    if not kernels:
+        sys.exit("no kernel metrics found — is this an `ncu --csv` long-format export?")
 
-    def get(row, key):
-        c = cols[key]
-        if c is None:
-            return None
-        try:
-            return float(row[headers.index(c)].replace(",", ""))
-        except (ValueError, IndexError):
-            return None
-
-    print(f"{'kernel':50} {'SM%':>6} {'DRAM%':>6} {'L2%':>6}  class")
-    print("-" * 84)
-    for row in rows[hdr_idx + 1:]:
-        if not row or len(row) < len(headers):
-            continue
-        name = row[headers.index(kname)][:48] if kname else "?"
-        sm, dram, l2 = get(row, "sm_pct"), get(row, "dram_pct"), get(row, "l2_hit")
-        cls = classify(sm, dram, args.hi, args.lo)
-        print(f"{name:50} {sm if sm is not None else '-':>6} "
-              f"{dram if dram is not None else '-':>6} {l2 if l2 is not None else '-':>6}  {cls}")
+    hdr = f"{'kernel':30} {'dur_us':>8} {'SM%':>6} {'MEM%':>6} {'DRAM%':>6} {'L2hit%':>7} {'occ%':>6}  class"
+    print(hdr)
+    print("-" * len(hdr))
+    for (kid, name), m in kernels.items():
+        dur = m.get("duration_ns")
+        row = [
+            f"{short(name, 30):30}",
+            f"{dur/1000:8.1f}" if dur is not None else f"{'-':>8}",
+        ]
+        for key in ("sm_pct", "mem_pct", "dram_pct", "l2_hit"):
+            v = m.get(key)
+            row.append(f"{v:6.1f}" if v is not None else f"{'-':>6}")
+        occ = m.get("occupancy")
+        row.append(f"{occ:6.1f}" if occ is not None else f"{'-':>6}")
+        row.append("  " + classify(m.get("sm_pct"), m.get("mem_pct"), args.hi, args.lo))
+        print(" ".join(row))
 
 
 if __name__ == "__main__":

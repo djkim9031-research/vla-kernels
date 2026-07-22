@@ -19,14 +19,20 @@ rather than microbenchmarks alone.
 
 | component | state |
 |-----------|-------|
-| Kernel #1 — fused softmax (v0–v3 + auto) | ✅ builds, tested, benchmarked → [docs/softmax.md](docs/softmax.md) |
-| Bench toolkit (correctness/latency/bandwidth, roofline, trtexec) | ✅ |
+| Kernel #1 — fused softmax (v0–v3 + auto) | ✅ built, tested, benchmarked → [docs/softmax.md](docs/softmax.md) |
+| Library baselines — cuDNN softmax, CUB-reduction softmax | ✅ benchmarked + profiled alongside ours |
+| Nsight Compute roofline analysis (all 6 kernels) | ✅ → [docs/softmax.md](docs/softmax.md) |
+| Bench toolkit (correctness/latency/bandwidth, ncu parser, trtexec) | ✅ |
 | SmolVLA harness (load / patch / parity / e2e) | ✅ code; runs in Docker |
 | LayerNorm · fused attention · WMMA GEMM · Triton · INT8/TRT | ⏳ roadmap |
 
-**Headline so far:** the warp-per-row softmax beats `torch.softmax` by up to
-**4.5× (fp16)** on Thor; the online-softmax variant hits **~405 GB/s** on wide
-rows. See [docs/softmax.md](docs/softmax.md).
+**Headline so far (locked clocks):** the warp-per-row kernel **matches cuDNN at
+2048×512 and runs 1.8–2.0× faster at 512×2048** — up to **2.6× over
+`torch.softmax`** (fp16) on the many-row shapes attention produces. Under
+cold-cache profiling the CUB-reduction variant leads (22.7 µs vs cuDNN's
+42.8 µs at 512×2048 fp32), and the counters explain every ranking — including
+how cuDNN's register-resident kernel trades occupancy for minimal memory
+traffic. Full analysis in [docs/softmax.md](docs/softmax.md).
 
 ## Layout
 
