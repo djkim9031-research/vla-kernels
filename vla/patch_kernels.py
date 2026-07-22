@@ -20,12 +20,14 @@ import contextlib
 import torch
 import torch.nn.functional as F
 
-from kernels.softmax import softmax as fused_softmax
-
 _orig_softmax = F.softmax
 
 
 def _patched_softmax(input, dim=None, _stacklevel=3, dtype=None):
+    # deferred import: the original (unpatched) variant must not require the
+    # CUDA toolchain, and the JIT build should only trigger when patching
+    from kernels.softmax import softmax as fused_softmax
+
     last = dim in (-1, input.dim() - 1) if dim is not None else False
     if (last and input.is_cuda and input.is_contiguous()
             and input.dtype in (torch.float32, torch.float16) and dtype is None):

@@ -9,3 +9,4 @@ build/
 *.sqlite
 results/*.log
 .venv/
+.torch_ext_cache/

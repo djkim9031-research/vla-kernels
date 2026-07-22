@@ -23,22 +23,37 @@ from vla.patch_kernels import use_custom_kernels
 
 @torch.no_grad()
 def get_action(policy, obs):
-    # lerobot policies expose select_action; fall back to forward if renamed
-    fn = getattr(policy, "select_action", None) or policy.forward
+    """One full model inference.
+
+    Prefer predict_action_chunk: select_action pops from an internal action
+    queue and only runs the model every chunk_size-th call, which would make
+    naive timing/parity mostly measure queue pops. The chunk forward is the
+    real recurring cost (and gives chunk_size x action_dim values for parity).
+    """
+    fn = (getattr(policy, "predict_action_chunk", None)
+          or getattr(policy, "select_action", None) or policy.forward)
     return fn(obs)
 
 
 @torch.no_grad()
 def numerical_parity(policy, n: int = 16, seed: int = 0):
-    """Compare actions with vs without the custom kernels on identical inputs."""
+    """Compare actions with vs without the custom kernels on identical inputs.
+
+    The action expert is flow-matching: it draws starting noise from the
+    global RNG, so each inference is stochastic (self-diff ~2.9 unseeded).
+    Seeding identically before every call removes that, leaving only the
+    kernel-substitution difference (verified: seeded self-diff is exactly 0).
+    """
     torch.manual_seed(seed)
     obs_list = [dummy_observation(policy) for _ in range(n)]
 
     base, tuned = [], []
-    for obs in obs_list:
+    for i, obs in enumerate(obs_list):
+        torch.manual_seed(seed + i)
         base.append(get_action(policy, obs).float())
     with use_custom_kernels(True):
-        for obs in obs_list:
+        for i, obs in enumerate(obs_list):
+            torch.manual_seed(seed + i)
             tuned.append(get_action(policy, obs).float())
 
     b = torch.stack(base)

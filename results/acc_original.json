@@ -1,0 +1,8 @@
+{
+  "variant": "original",
+  "numerical_parity": {
+    "max_abs_err": 0.01639258861541748,
+    "mse": 8.26517953100847e-06,
+    "cosine": 0.9999966621398926
+  }
+}
