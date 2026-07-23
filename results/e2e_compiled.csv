@@ -1,2 +1,2 @@
 variant,p50_ms,p99_ms,mean_ms,hz,first_call_s,graph_breaks,unique_graphs
-original,198.447,236.641,201.041,5.0,0.6,0,0
+compiled,94.276,108.4,92.613,10.6,203.1,7,11

@@ -24,8 +24,7 @@ import torch
 import mlperf_loadgen as lg
 
 from vla.load_smolvla import load_policy, dummy_observation
-from vla.patch_kernels import use_custom_kernels
-from vla.eval_accuracy import get_action
+from vla.variants import VARIANTS, make_infer, warmup
 
 SCENARIOS = {
     "SingleStream": lg.TestScenario.SingleStream,
@@ -34,17 +33,17 @@ SCENARIOS = {
 
 
 class SmolVLASut:
-    """SUT: each LoadGen query is one policy inference on a pooled observation."""
+    """SUT: each LoadGen query is one chunk inference on a pooled observation."""
 
-    def __init__(self, policy, obs_pool):
-        self.policy = policy
+    def __init__(self, infer_fn, obs_pool):
+        self.infer_fn = infer_fn
         self.obs_pool = obs_pool
 
     def issue_queries(self, samples):
         for s in samples:
             obs = self.obs_pool[s.index % len(self.obs_pool)]
             with torch.no_grad():
-                get_action(self.policy, obs)
+                self.infer_fn(obs)
             torch.cuda.synchronize()
             resp = lg.QuerySampleResponse(s.id, 0, 0)
             lg.QuerySamplesComplete([resp])
@@ -55,13 +54,13 @@ class SmolVLASut:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--variant", choices=["original", "tuned"], default="original")
+    ap.add_argument("--variant", choices=VARIANTS, default="original")
     ap.add_argument("--scenario", choices=list(SCENARIOS), default="SingleStream")
     ap.add_argument("--pool-size", type=int, default=16,
                     help="distinct observations cycled through queries")
-    ap.add_argument("--min-queries", type=int, default=270,
-                    help="minimum query count (MLPerf edge default is higher; "
-                         "this keeps local runs short)")
+    ap.add_argument("--min-queries", type=int, default=330,
+                    help="minimum query count; 330 keeps Offline above the "
+                         "60 s validity window at ~4.6 samples/s")
     ap.add_argument("--min-duration-ms", type=int, default=60_000)
     ap.add_argument("--outdir", default="")
     args = ap.parse_args()
@@ -84,16 +83,14 @@ def main():
     log_settings.log_output.outdir = outdir
     log_settings.log_output.copy_summary_to_stdout = True
 
-    sut_impl = SmolVLASut(policy, obs_pool)
+    ctx, infer_fn = make_infer(policy, args.variant)
+    sut_impl = SmolVLASut(infer_fn, obs_pool)
     sut = lg.ConstructSUT(sut_impl.issue_queries, sut_impl.flush)
     qsl = lg.ConstructQSL(args.pool_size, args.pool_size,
                           lambda s: None, lambda s: None)  # obs stay resident
 
-    with use_custom_kernels(args.variant == "tuned"):
-        # warmup outside the timed window
-        for _ in range(10):
-            get_action(policy, obs_pool[0])
-        torch.cuda.synchronize()
+    with ctx, torch.no_grad():
+        warmup(infer_fn, obs_pool[0], 10)   # compile + warm outside timed window
         lg.StartTestWithLogSettings(sut, qsl, settings, log_settings)
 
     lg.DestroyQSL(qsl)

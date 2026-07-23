@@ -1,2 +1,2 @@
-variant,p50_ms,p99_ms,mean_ms,hz
-tuned,218.996,226.319,219.692,4.6
+variant,p50_ms,p99_ms,mean_ms,hz,first_call_s,graph_breaks,unique_graphs
+tuned,204.62,215.77,204.845,4.9,0.7,0,0

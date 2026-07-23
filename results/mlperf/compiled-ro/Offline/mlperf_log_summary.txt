@@ -2,47 +2,37 @@
 MLPerf Results Summary
 ================================================
 SUT name : PySUT
-Scenario : SingleStream
+Scenario : Offline
 Mode     : PerformanceOnly
-90.0th percentile latency (ns) : 210144420
+Samples per second: 13.7546
 Result is : VALID
   Min duration satisfied : Yes
   Min queries satisfied : Yes
   Early stopping satisfied: Yes
-Early Stopping Result:
- * Processed at least 64 queries (330).
- * Would discard 19 highest latency queries.
- * Early stopping 90.0th percentile estimate: 211793681
- * Not enough queries processed for 99.0th percentile
- early stopping estimate (would need to process at
- least 662 total queries).
 
 ================================================
 Additional Stats
 ================================================
-QPS w/ loadgen overhead         : 4.90
-QPS w/o loadgen overhead        : 4.90
-
-Min latency (ns)                : 194259644
-Max latency (ns)                : 223547955
-Mean latency (ns)               : 204150994
-50.00 percentile latency (ns)   : 204212195
-90.00 percentile latency (ns)   : 210144420
-95.00 percentile latency (ns)   : 212269141
-97.00 percentile latency (ns)   : 214085456
-99.00 percentile latency (ns)   : 216538110
-99.90 percentile latency (ns)   : 223547955
+Min latency (ns)                : 69632711
+Max latency (ns)                : 61797730559
+Mean latency (ns)               : 30906585073
+50.00 percentile latency (ns)   : 30935597478
+90.00 percentile latency (ns)   : 55648346160
+95.00 percentile latency (ns)   : 58734608455
+97.00 percentile latency (ns)   : 59971630496
+99.00 percentile latency (ns)   : 61208555704
+99.90 percentile latency (ns)   : 61797730559
 
 ================================================
 Test Parameters Used
 ================================================
-samples_per_query : 1
-target_qps : 1000
+samples_per_query : 850
+target_qps : 1
 target_latency (ns): 0
 max_async_queries : 1
 min_duration (ms): 60000
 max_duration (ms): 0
-min_query_count : 330
+min_query_count : 1
 max_query_count : 0
 qsl_rng_seed : 0
 sample_index_rng_seed : 0

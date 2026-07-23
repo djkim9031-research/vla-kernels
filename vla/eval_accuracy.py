@@ -1,14 +1,17 @@
-"""Accuracy parity: original vs. kernel-tuned SmolVLA.
+"""Accuracy parity vs the eager original, per variant (the MLPerf-gate proxy).
 
-Two layers (see plan):
-  1. Numerical parity  — identical observations -> compare action tensors
-     (max-abs / MSE / cosine). Fast, deterministic, no env. The regression gate.
-  2. Task success rate — sim rollouts via LeRobot eval (the real metric). Hooked
-     here; enable with --rollouts once a sim env is configured.
+The action expert is flow-matching: it draws starting noise from the global
+RNG, so inference is stochastic (self-diff ~2.9 unseeded, exactly 0 when
+seeded). Seeding identically before every call removes that, leaving only the
+variant-substitution difference.
+
+Gate (per MLPerf methodology): a variant is reportable only if it retains
+>= 99% of the reference metric — until sim rollouts exist, the proxy is
+numerical parity (cosine similarity of action chunks).
 
 Usage (in Docker):
     python3 vla/eval_accuracy.py --variant original --out results/acc_original.json
-    python3 vla/eval_accuracy.py --variant tuned --baseline results/acc_original.json
+    python3 vla/eval_accuracy.py --variant compiled --baseline results/acc_original.json
 """
 from __future__ import annotations
 
@@ -18,73 +21,60 @@ import json
 import torch
 
 from vla.load_smolvla import load_policy, dummy_observation
-from vla.patch_kernels import use_custom_kernels
+from vla.variants import VARIANTS, base_infer, make_infer
 
 
 @torch.no_grad()
 def get_action(policy, obs):
-    """One full model inference.
-
-    Prefer predict_action_chunk: select_action pops from an internal action
-    queue and only runs the model every chunk_size-th call, which would make
-    naive timing/parity mostly measure queue pops. The chunk forward is the
-    real recurring cost (and gives chunk_size x action_dim values for parity).
-    """
-    fn = (getattr(policy, "predict_action_chunk", None)
-          or getattr(policy, "select_action", None) or policy.forward)
-    return fn(obs)
+    """One full model inference (chunk forward — select_action pops a queue)."""
+    return base_infer(policy)(obs)
 
 
 @torch.no_grad()
-def numerical_parity(policy, n: int = 16, seed: int = 0):
-    """Compare actions with vs without the custom kernels on identical inputs.
-
-    The action expert is flow-matching: it draws starting noise from the
-    global RNG, so each inference is stochastic (self-diff ~2.9 unseeded).
-    Seeding identically before every call removes that, leaving only the
-    kernel-substitution difference (verified: seeded self-diff is exactly 0).
-    """
+def numerical_parity(policy, variant: str, n: int = 16, seed: int = 0):
+    """Seeded eager reference vs the variant on identical inputs."""
     torch.manual_seed(seed)
     obs_list = [dummy_observation(policy) for _ in range(n)]
 
-    base, tuned = [], []
+    ref_fn = base_infer(policy)
+    ref = []
     for i, obs in enumerate(obs_list):
         torch.manual_seed(seed + i)
-        base.append(get_action(policy, obs).float())
-    with use_custom_kernels(True):
+        ref.append(ref_fn(obs).float().clone())
+
+    ctx, fn = make_infer(policy, variant)
+    out = []
+    with ctx:
+        fn(obs_list[0])  # warm/compile outside the seeded comparison
         for i, obs in enumerate(obs_list):
             torch.manual_seed(seed + i)
-            tuned.append(get_action(policy, obs).float())
+            # clone: under CUDA graphs (compiled-ro) outputs live in static
+            # buffers that the next replay overwrites
+            out.append(fn(obs).float().clone())
 
-    b = torch.stack(base)
-    t = torch.stack(tuned)
+    b, t = torch.stack(ref), torch.stack(out)
+    cos = torch.nn.functional.cosine_similarity(
+        b.flatten(1), t.flatten(1), dim=1).mean().item()
     return {
         "max_abs_err": (b - t).abs().max().item(),
         "mse": ((b - t) ** 2).mean().item(),
-        "cosine": torch.nn.functional.cosine_similarity(
-            b.flatten(1), t.flatten(1), dim=1).mean().item(),
+        "cosine": cos,
+        "retention_gate_99": bool(cos >= 0.99),
     }
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--variant", choices=["original", "tuned"], default="tuned")
+    ap.add_argument("--variant", choices=VARIANTS, default="original")
     ap.add_argument("--rollouts", type=int, default=0,
-                    help="sim episodes for task success rate (0 = skip)")
+                    help="sim episodes for task success rate (0 = skip; roadmap)")
     ap.add_argument("--out", default="")
     ap.add_argument("--baseline", default="", help="baseline json to diff against")
     args = ap.parse_args()
 
     policy = load_policy()
-    result = {"variant": args.variant}
-    result["numerical_parity"] = numerical_parity(policy)
-
-    if args.rollouts:
-        # TODO: wire LeRobot sim eval (gym env + rollout loop) -> success rate.
-        # success = run_sim_rollouts(policy, episodes=args.rollouts,
-        #                            patched=(args.variant == "tuned"))
-        result["task_success_rate"] = None
-        print("note: --rollouts requested but sim eval not yet wired (roadmap)")
+    result = {"variant": args.variant,
+              "numerical_parity": numerical_parity(policy, args.variant)}
 
     print(json.dumps(result, indent=2))
     if args.out:
@@ -92,10 +82,10 @@ def main():
             json.dump(result, f, indent=2)
     if args.baseline:
         with open(args.baseline) as f:
-            base = json.load(f)
-        print("\n[parity vs baseline]")
-        print(f"  max_abs_err: {result['numerical_parity']['max_abs_err']:.2e}")
-        print(f"  cosine:      {result['numerical_parity']['cosine']:.6f}")
+            json.load(f)  # existence check; parity above is already vs eager
+        p = result["numerical_parity"]
+        print(f"\n[gate] cosine {p['cosine']:.6f} -> "
+              f"{'PASS' if p['retention_gate_99'] else 'FAIL'} (>=0.99 proxy)")
 
 
 if __name__ == "__main__":

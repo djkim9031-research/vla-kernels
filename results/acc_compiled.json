@@ -1,0 +1,9 @@
+{
+  "variant": "compiled",
+  "numerical_parity": {
+    "max_abs_err": 0.062425971031188965,
+    "mse": 0.00011238056322326884,
+    "cosine": 0.99996018409729,
+    "retention_gate_99": true
+  }
+}

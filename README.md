@@ -23,16 +23,22 @@ rather than microbenchmarks alone.
 | Library baselines — cuDNN softmax, CUB-reduction softmax | ✅ benchmarked + profiled alongside ours |
 | Nsight Compute roofline analysis (all 6 kernels) | ✅ → [docs/softmax.md](docs/softmax.md) |
 | Bench toolkit (correctness/latency/bandwidth, ncu parser, trtexec) | ✅ |
-| SmolVLA harness (load / patch / parity / e2e) | ✅ code; runs in Docker |
-| LayerNorm · fused attention · WMMA GEMM · Triton · INT8/TRT | ⏳ roadmap |
+| SmolVLA harness (load / patch / parity / e2e / LoadGen) | ✅ measured on Thor |
+| Variant comparison: eager · kernel-patch · torch.compile · +CUDA Graphs | ✅ → [results/e2e_comparison.md](results/e2e_comparison.md) |
+| v4 softmax (bf16) · fused attention · WMMA GEMM · Triton · INT8/TRT | ⏳ roadmap |
 
-**Headline so far (locked clocks):** the warp-per-row kernel **matches cuDNN at
-2048×512 and runs 1.8–2.0× faster at 512×2048** — up to **2.6× over
-`torch.softmax`** (fp16) on the many-row shapes attention produces. Under
-cold-cache profiling the CUB-reduction variant leads (22.7 µs vs cuDNN's
-42.8 µs at 512×2048 fp32), and the counters explain every ranking — including
-how cuDNN's register-resident kernel trades occupancy for minimal memory
-traffic. Full analysis in [docs/softmax.md](docs/softmax.md).
+**Headlines so far (locked clocks):**
+
+- *Kernels:* the warp-per-row softmax **matches cuDNN at 2048×512 and runs
+  1.8–2.0× faster at 512×2048** — up to 2.6× over `torch.softmax` (fp16); the
+  Nsight counters explain every ranking, including cuDNN's register-resident
+  trade. → [docs/softmax.md](docs/softmax.md)
+- *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → **73.8 ms with
+  torch.compile + CUDA Graphs (2.7×, MLPerf-style p90 76.4 ms, accuracy
+  retention 0.99997 — gate PASS)**. The per-op softmax swap alone is −3%:
+  fusion granularity, not op substitution, is what survives end-to-end. The
+  compiled number is the bar the hand-fused attention kernel must beat.
+  → [results/e2e_comparison.md](results/e2e_comparison.md)
 
 ## Layout
 

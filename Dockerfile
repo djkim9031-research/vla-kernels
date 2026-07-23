@@ -38,6 +38,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3-dev \
 # deps (transformers, accelerate, num2words) are present.
 RUN pip install --no-cache-dir "lerobot[smolvla]"
 
+# torch.compile on Thor: triton 3.6 bundles a CUDA 12.9 ptxas that rejects
+# sm_110a; point its binaries at the CUDA 13 ptxas from the base image.
+RUN TB=/opt/venv/lib/python3.12/site-packages/triton/backends/nvidia/bin && \
+    ln -sf /usr/local/cuda/bin/ptxas $TB/ptxas-blackwell && \
+    ln -sf /usr/local/cuda/bin/ptxas $TB/ptxas
+
 # nvcc + CUDA headers so the tuned variant can JIT-build our kernels inside
 # the container (the runtime base ships no compiler; NVIDIA's apt repo is
 # preconfigured in the cuda images). Much smaller than switching to -devel.
