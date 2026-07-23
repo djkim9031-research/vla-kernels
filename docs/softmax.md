@@ -13,34 +13,69 @@ Jetson Thor (sm_110, CUDA 13.0, clocks locked via `bench/rig.sh`).
 | v1 | one **warp** per row | `__shfl_xor` register reductions, no barriers |
 | v2 | one **block** per row | shared-mem block reduce, safe softmax (3 passes) |
 | v3 | one **block** per row | **online softmax**: fused max+sum, 2 passes |
+| **v4** | one **block** per row | **fused (m,l) tree + raking combine + register-resident rows** — the synthesis of the profiling findings below |
 | cudnn | `cudnnSoftmaxForward` | vendor baseline (register-resident design) |
 | cub | v2 structure on `cub::BlockReduce` | library raking reduction vs our hand-rolled one |
 
-`softmax(x, "auto")` routes by shape: rows ≥ 32 → v1, few wide rows → v3.
-cuBLAS has no softmax op; it becomes the baseline at the GEMM kernel instead.
+v4 folds in one lesson per profiled competitor: a single fused (m,l)
+online reduction tree instead of separate max and sum trees; CUB's raking
+cross-warp combine (2 barriers total vs v2/v3's 4–6); and cuDNN's
+register-resident trick at a modest budget (RPT=8 floats/thread, so rows up
+to 2048 columns are read from global memory exactly once and written from
+registers) without cuDNN's occupancy collapse. Wider rows fall back to a
+streaming path with the same reduction. All dtypes: fp32, fp16, **bf16**
+(fp32 accumulation throughout).
+
+`softmax(x, "auto")` routes by measured crossover: cols > 2048 → v4;
+else rows ≥ 32 → v1; else v4. cuBLAS has no softmax op; it becomes the
+baseline at the GEMM kernel instead.
+
+The op is registered with the dispatcher (`TORCH_LIBRARY(vlak)` +
+`register_fake`), so `softmax()` traces as a single node under
+`torch.compile(fullgraph=True)` / `torch.export` — the same custom-op
+pattern the fused attention kernel uses.
 
 ## Warm benchmark (locked clocks, 100-iter loop)
 
-Selected rows; full sweep in `results/softmax.csv` (5 shapes × fp32/fp16 × 6
-variants). Times in ms.
+Selected rows; full sweep in `results/softmax.csv` (5 shapes × fp32/fp16/bf16
+× 7 variants, 105 rows). Times in ms.
 
-| shape · dtype | torch | v1 | v3 | cudnn | cub |
+| shape · dtype | torch | v1 | **v4** | cudnn | cub |
 |---|---|---|---|---|---|
-| 2048×512 fp32 | 0.0145 | **0.0124** | 0.0328 | 0.0123 | 0.0473 |
-| 512×2048 fp32 | 0.0204 | **0.0144** | 0.0205 | 0.0290 | 0.0164 |
-| 512×2048 fp16 | 0.0308 | **0.0124** | 0.0210 | 0.0226 | 0.0164 |
-| 256×4096 fp16 | 0.0376 | 0.0143 | 0.0206 | 0.0196 | **0.0142** |
-| 64×16384 fp32 | 0.0267 | 0.0308 | 0.0333 | 0.0226 | **0.0164** |
-| 64×16384 fp16 | 0.0280 | 0.0247 | 0.0297 | 0.0248 | **0.0144** |
+| 2048×512 fp32 | 0.0154 | **0.0124** | 0.0347 | 0.0127 | 0.0472 |
+| 512×2048 fp32 | 0.0205 | 0.0144 | **0.0124** | 0.0291 | 0.0164 |
+| 512×2048 fp16 | 0.0309 | **0.0124** | 0.0128 | 0.0226 | 0.0164 |
+| 512×2048 bf16 | 0.0437 | 0.0125 | **0.0124** | 0.0226 | 0.0173 |
+| 256×4096 fp32 | 0.0371 | 0.0165 | **0.0136** | 0.0206 | 0.0144 |
+| 256×4096 fp16 | 0.0370 | 0.0144 | **0.0136** | 0.0184 | 0.0143 |
+| 256×4096 bf16 | 0.0374 | 0.0145 | **0.0132** | 0.0188 | 0.0144 |
+| 64×16384 fp32 | 0.0267 | 0.0309 | **0.0162** | 0.0254 | 0.0164 |
+| 64×16384 fp16 | 0.0388 | 0.0246 | **0.0132** | 0.0230 | 0.0148 |
+| 64×16384 bf16 | 0.0274 | 0.0285 | **0.0138** | 0.0226 | 0.0150 |
 
-The winner is shape-dependent:
+The winner is shape-dependent, and v4 now owns everything from 2048 columns
+up:
 
-- **Many rows (attention regime):** v1 matches cuDNN at 2048×512 and is
-  1.8–2.0× faster at 512×2048; up to 2.6× over `torch.softmax` (fp16).
-- **Few wide rows:** the CUB-reduction variant leads (1.6–1.9× over torch at
-  64×16384); row-level parallelism runs out and block-per-row with an
-  efficient reduction wins.
+- **Wide rows (cols ≥ ~2048, any row count):** v4 leads — up to 3.5× over
+  torch (bf16 512×2048), ~2.9× at fp16 64×16384, and ahead of CUB at the
+  shape where CUB previously beat our v2/v3. bf16 mirrors fp16 throughout.
+- **Many rows, narrow cols:** v1 keeps the crown (matches cuDNN at
+  2048×512); at 512 columns a block per row leaves parallelism on the table
+  that v1's warp-per-row gets for free.
 - **Tiny rows (1024×128):** cuDNN edges everyone; launch overhead dominates.
+
+A lesson worth keeping from v4's first iteration: the register-resident path
+initially reused the *online* update across its 8 register elements — an
+8-step serial chain of exponentials per thread (ncu: SM 40.6%, 26.8 µs cold).
+Switching to the classic two-phase form on the registers (independent max
+tree, then independent exp sum) cut SM pressure to 31.7% and the time to
+25.7 µs. **Online softmax is required for streaming data and for cross-thread
+merges — on register-resident data it is pure overhead.**
+
+Cold-cache (ncu, 512×2048 fp32): v4 25.7 µs — L2 hit 0.2% (each byte read
+once, the cuDNN pattern) at 90.6% occupancy (vs cuDNN's 31.8%). CUB's
+three-pass kernel remains slightly ahead cold at this one shape (22.7 µs,
+L1-resident re-reads); warm, v4 leads it by ~25%.
 
 An earlier run of this table (June) was taken without locked clocks and
 overstated the speedups (e.g. 4.45× vs torch at 512×2048 fp16; the
@@ -105,17 +140,17 @@ count once L2 holds the data.
 - `ncu` needs `sudo` on Tegra; pass `HOME=$HOME` so root's python finds the
   user-installed torch.
 
-## Takeaways → v4
+## Takeaways (v4 shipped)
 
 1. Reduction implementation efficiency matters as much as memory-pass count
-   at cache-resident row sizes. Adopt the raking pattern (or
-   `cub::BlockReduce` directly) in the block-per-row path.
-2. Register residency is the minimal-traffic ideal but must be budgeted to
-   keep ≥ 32 warps/SM — steal it in moderation for the attention kernel.
-3. Planned v4: raking reduce + online max/sum + moderate register blocking;
-   expected to lead the cold-cache table across shapes. The online `(m, l)`
-   merge in v3 is associative, so the same state generalizes to multi-block
-   rows and split-KV attention.
+   at cache-resident row sizes — v4's raking combine + fused (m,l) tree
+   closed the gap CUB exposed, and the register-resident write pass closed
+   cuDNN's traffic advantage without its occupancy cost.
+2. No single decomposition wins all shapes: v1 (warp-per-row) and v4
+   (block-per-row) split the table along the measured `auto` crossover.
+3. The v4 building blocks are the fused-attention kernel's per-tile
+   machinery: the `(m, l)` merge is associative, so the same state handles
+   flash-style tiling and split-KV combines. Next stop: Phase D.
 
 ## Reproduce
 

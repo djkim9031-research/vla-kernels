@@ -18,7 +18,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-DTYPES = {"fp32": torch.float32, "fp16": torch.float16}
+DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 def cuda_time_ms(fn, iters: int, warmup: int = 25) -> float:

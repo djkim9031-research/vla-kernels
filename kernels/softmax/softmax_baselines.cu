@@ -34,8 +34,11 @@ torch::Tensor softmax_cudnn(torch::Tensor x) {
   static cudnnTensorDescriptor_t desc = nullptr;
   static int c_rows = -1, c_cols = -1;
   static cudnnDataType_t c_dt = CUDNN_DATA_FLOAT;
-  cudnnDataType_t dt = x.scalar_type() == torch::kFloat16 ? CUDNN_DATA_HALF
-                                                          : CUDNN_DATA_FLOAT;
+  cudnnDataType_t dt = x.scalar_type() == torch::kFloat16
+                           ? CUDNN_DATA_HALF
+                           : x.scalar_type() == torch::kBFloat16
+                                 ? CUDNN_DATA_BFLOAT16
+                                 : CUDNN_DATA_FLOAT;
   if (!desc) CUDNN_CHECK(cudnnCreateTensorDescriptor(&desc));
   if (rows != c_rows || cols != c_cols || dt != c_dt) {
     // N=rows, C=cols, H=W=1; MODE_INSTANCE reduces over C*H*W per N => per-row
@@ -101,7 +104,9 @@ torch::Tensor softmax_cub(torch::Tensor x) {
   int rows = x.size(0), cols = x.size(1);
   constexpr int BLOCK = 256;
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(x.scalar_type(), "softmax_cub", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      x.scalar_type(), "softmax_cub", [&] {
     softmax_cub_kernel<scalar_t, BLOCK><<<rows, BLOCK>>>(
         x.data_ptr<scalar_t>(), y.data_ptr<scalar_t>(), rows, cols);
   });

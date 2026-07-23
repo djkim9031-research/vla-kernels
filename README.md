@@ -29,10 +29,13 @@ rather than microbenchmarks alone.
 
 **Headlines so far (locked clocks):**
 
-- *Kernels:* the warp-per-row softmax **matches cuDNN at 2048×512 and runs
-  1.8–2.0× faster at 512×2048** — up to 2.6× over `torch.softmax` (fp16); the
-  Nsight counters explain every ranking, including cuDNN's register-resident
-  trade. → [docs/softmax.md](docs/softmax.md)
+- *Kernels:* v4 (fused online tree + raking combine + register-resident rows,
+  fp32/fp16/**bf16**) leads every wide-row shape — **up to 3.5× over
+  `torch.softmax` (bf16) and ahead of cuDNN and CUB**; v1 warp-per-row keeps
+  the many-row/narrow crown. Registered as a dispatcher op
+  (`vlak::softmax`), it traces as one node under
+  `torch.compile(fullgraph=True)`. Nsight counters back every claim.
+  → [docs/softmax.md](docs/softmax.md)
 - *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → **73.8 ms with
   torch.compile + CUDA Graphs (2.7×, MLPerf-style p90 76.4 ms, accuracy
   retention 0.99997 — gate PASS)**. The per-op softmax swap alone is −3%:
