@@ -109,7 +109,8 @@ template <int BMT>
 __global__ void fused_attention_wmma_bf16(
     const __nv_bfloat16* __restrict__ q, const __nv_bfloat16* __restrict__ k,
     const __nv_bfloat16* __restrict__ v, __nv_bfloat16* __restrict__ o,
-    const bool* __restrict__ mask, int H, int BH, int M, int N, float scale) {
+    const bool* __restrict__ mask, int prefix_len, int H,
+    int BH, int M, int N, float scale) {
   extern __shared__ unsigned char smem_raw[];
   constexpr int TPR = V2_THREADS / BMT;      // scalar threads per query row
   __nv_bfloat16* Qs = (__nv_bfloat16*)smem_raw;                    // BMT x LD
@@ -161,6 +162,10 @@ __global__ void fused_attention_wmma_bf16(
 
   prefetch(0, 0);
   int n_tiles = (N + BN - 1) / BN;
+  // analytic-mask staircase base: visible(col; row) = col < prefix_len
+  //                                || col <= startNM + row   (suffix causal)
+  int startNM = N - M;
+  int rows_lo = m0, rows_hi = min(m0 + BMT, M) - 1;
 
   for (int t = 0; t < n_tiles; ++t) {
     int n0 = t * BN, cur = t & 1;
@@ -170,6 +175,22 @@ __global__ void fused_attention_wmma_bf16(
     } else {
       __pipeline_wait_prior(0);
     }
+
+    // classify this KV tile against the (analytic) mask: 2 = fully visible
+    // (branchless fast path), 1 = partial (per-element check), 0 = invisible
+    // (skip all compute; uniform across the block so barriers stay balanced)
+    int tstate;
+    bool tail = n0 + BN > N;            // tile contains zero-padded cols >= N:
+                                        // NEVER eligible for the no-check path
+    if (prefix_len >= 0) {
+      int last = n0 + BN - 1;
+      bool full = !tail && ((last < prefix_len) || (last <= startNM + rows_lo));
+      bool empty = (n0 >= prefix_len) && (n0 > startNM + rows_hi);
+      tstate = full ? 2 : (empty ? 0 : 1);
+    } else {
+      tstate = (mb || tail) ? 1 : 2;    // per-element checks unless clean+unmasked
+    }
+    if (tstate == 0) { __syncthreads(); continue; }
     __syncthreads();
 
     // S(BMT x 64) = Q @ K^T: (row-frag x col-frag) jobs spread over all 8 warps
@@ -197,11 +218,28 @@ __global__ void fused_attention_wmma_bf16(
       bool row_ok = grow < M;
 
       float tmax = -FLT_MAX;
-      for (int c = c0; c < c0 + BN / TPR; ++c) {
-        bool valid = row_ok && (n0 + c < N) && (!mr || mr[c]);
-        float val = valid ? S[r * LD + c] * scale : -FLT_MAX;
-        S[r * LD + c] = val;
-        tmax = fmaxf(tmax, val);
+      if (tstate == 2) {                 // fully visible: no per-element checks
+        for (int c = c0; c < c0 + BN / TPR; ++c) {
+          float val = row_ok ? S[r * LD + c] * scale : -FLT_MAX;
+          S[r * LD + c] = val;
+          tmax = fmaxf(tmax, val);
+        }
+      } else if (prefix_len >= 0) {      // partial, analytic: mask is arithmetic
+        for (int c = c0; c < c0 + BN / TPR; ++c) {
+          int gc = n0 + c;
+          bool valid = row_ok && gc < N &&
+                       (gc < prefix_len || gc <= startNM + grow);
+          float val = valid ? S[r * LD + c] * scale : -FLT_MAX;
+          S[r * LD + c] = val;
+          tmax = fmaxf(tmax, val);
+        }
+      } else {                           // partial, tensor mask
+        for (int c = c0; c < c0 + BN / TPR; ++c) {
+          bool valid = row_ok && (n0 + c < N) && (!mr || mr[c]);
+          float val = valid ? S[r * LD + c] * scale : -FLT_MAX;
+          S[r * LD + c] = val;
+          tmax = fmaxf(tmax, val);
+        }
       }
       pmax[r * TPR + quart] = tmax;
       __syncthreads();
@@ -271,7 +309,8 @@ constexpr size_t v2_smem(int bmt) {
 
 torch::Tensor fused_attention(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                               double scale,
-                              std::optional<torch::Tensor> attn_mask) {
+                              std::optional<torch::Tensor> attn_mask,
+                              int64_t prefix_len) {
   TORCH_CHECK(q.is_cuda() && q.dim() == 4, "expected 4D CUDA (B,H,M,D)");
   TORCH_CHECK(q.size(3) == HEAD_DIM, "this kernel is specialized to head_dim 64");
   TORCH_CHECK(k.size(3) == HEAD_DIM && v.size(3) == HEAD_DIM, "k/v head_dim 64");
@@ -311,15 +350,17 @@ torch::Tensor fused_attention(torch::Tensor q, torch::Tensor k, torch::Tensor v,
       fused_attention_wmma_bf16<32><<<BH * tiles_m, V2_THREADS, v2_smem(32)>>>(
           (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
           (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
-          mp, H, BH, M, N, sc);
+          mp, (int)prefix_len, H, BH, M, N, sc);
     } else {
       int tiles_m = (M + 63) / 64;
       fused_attention_wmma_bf16<64><<<BH * tiles_m, V2_THREADS, v2_smem(64)>>>(
           (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
           (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
-          mp, H, BH, M, N, sc);
+          mp, (int)prefix_len, H, BH, M, N, sc);
     }
   } else {                                     // v1: scalar warp-per-row path
+    TORCH_CHECK(prefix_len < 0,
+                "analytic prefix mask requires the bf16 tensor-core path");
     int threads = 128;
     int rows_per_block = threads / WARP_SIZE;
     int blocks = (BH * M + rows_per_block - 1) / rows_per_block;
@@ -340,14 +381,16 @@ torch::Tensor fused_attention(torch::Tensor q, torch::Tensor k, torch::Tensor v,
 
 TORCH_LIBRARY_FRAGMENT(vlak, m) {
   m.def("fused_attention(Tensor q, Tensor k, Tensor v, float scale=-1., "
-        "Tensor? attn_mask=None) -> Tensor");
+        "Tensor? attn_mask=None, int prefix_len=-1) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(vlak, CUDA, m) {
   m.impl("fused_attention", &fused_attention);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("fused_attention", &fused_attention, "fused SDPA (head_dim 64, opt. bool mask)",
+  m.def("fused_attention", &fused_attention,
+        "fused SDPA (head_dim 64; bool mask or analytic prefix+staircase mask)",
         pybind11::arg("q"), pybind11::arg("k"), pybind11::arg("v"),
-        pybind11::arg("scale") = -1.0, pybind11::arg("attn_mask") = std::nullopt);
+        pybind11::arg("scale") = -1.0, pybind11::arg("attn_mask") = std::nullopt,
+        pybind11::arg("prefix_len") = -1);
 }

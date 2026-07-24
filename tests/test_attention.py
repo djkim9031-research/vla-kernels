@@ -82,6 +82,29 @@ def test_masked_matches_reference(dtype, shape, prefix):
     torch.testing.assert_close(out, ref_sdpa(q, k, v, mask), rtol=rtol, atol=atol)
 
 
+@pytest.mark.parametrize("shape,prefix", [
+    ((1, 15, 50, 291), 241),
+    ((1, 15, 50, 241), 191),
+    ((1, 15, 241, 241), 241),   # all-visible: exercises the tile fast path
+    ((2, 4, 33, 65), 32),
+])
+def test_analytic_mask_equals_tensor_mask(shape, prefix):
+    # prefix_len must produce bit-identical routing to the materialized mask
+    torch.manual_seed(9)
+    B, H, M, N = shape
+    q = torch.randn(B, H, M, 64, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(B, H, N, 64, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn(B, H, N, 64, device="cuda", dtype=torch.bfloat16)
+    mask = smolvla_mask(B, M, N, prefix)
+    torch.testing.assert_close(
+        fused_attention(q, k, v, prefix_len=prefix),
+        fused_attention(q, k, v, attn_mask=mask),
+        rtol=0, atol=0)  # identical code path downstream -> exact match
+    torch.testing.assert_close(
+        fused_attention(q, k, v, prefix_len=prefix),
+        ref_sdpa(q, k, v, mask), rtol=2e-2, atol=2e-2)
+
+
 def test_masked_matches_torch_sdpa():
     torch.manual_seed(6)
     q = torch.randn(1, 15, 50, 64, device="cuda", dtype=torch.bfloat16)

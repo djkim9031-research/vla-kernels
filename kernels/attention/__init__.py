@@ -24,7 +24,8 @@ def _ext():
         verbose=bool(int(os.environ.get("VLAK_VERBOSE", "0"))),
     )
     torch.library.register_fake("vlak::fused_attention")(
-        lambda q, k, v, scale=-1.0, attn_mask=None: torch.empty_like(q))
+        lambda q, k, v, scale=-1.0, attn_mask=None, prefix_len=-1:
+            torch.empty_like(q))
     return ext
 
 
@@ -40,12 +41,19 @@ def _ensure_registered():
 
 def fused_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
                     scale: float | None = None,
-                    attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+                    attn_mask: torch.Tensor | None = None,
+                    prefix_len: int | None = None) -> torch.Tensor:
     """SDPA for (B, H, M, 64) tensors; scores never touch HBM.
 
-    attn_mask: optional (B, M, N) bool, broadcast over heads (True = attend).
-    bf16 inputs take the tensor-core WMMA path; other dtypes the scalar path.
+    Masking, in preference order:
+      prefix_len=P  the SmolVLA pattern as ARITHMETIC (no mask tensor at all):
+                    col visible iff col < P or col <= (N - M) + row.
+                    Fully-visible tiles take a branchless fast path; invisible
+                    tiles are skipped outright. bf16 tensor-core path only.
+      attn_mask     generic (B, M, N) bool, broadcast over heads.
+      neither       unmasked (fast path everywhere).
     """
     _ensure_registered()
     return torch.ops.vlak.fused_attention(
-        q, k, v, -1.0 if scale is None else scale, attn_mask)
+        q, k, v, -1.0 if scale is None else scale, attn_mask,
+        -1 if prefix_len is None else prefix_len)
