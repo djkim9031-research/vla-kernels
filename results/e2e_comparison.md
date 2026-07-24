@@ -14,7 +14,8 @@ balance, so cross-day ratios are not clock-invariant.
 | tuned | eager + fused-softmax patch | 204.6 / 215.8 | 4.9 | — | — | 0.999997 | PASS |
 | compiled | torch.compile (Inductor) | 94.3 / 108.4 | 10.6 | 85.6 ms | — | 0.999960 | PASS |
 | compiled-ro | + CUDA Graphs (reduce-overhead) | 73.8 / 82.0 | 13.5 | 76.4 ms | 13.75 | 0.999967 | PASS |
-| compiled-ro + SDPA fix | + flash-pinned vision attention | **66.1 / 73.3** | **15.1** | — | — | 0.999953 | PASS |
+| compiled-ro + SDPA fix | + flash-pinned vision attention | 66.1 / 73.3 | 15.1 | — | — | 0.999953 | PASS |
+| + eager→SDPA routing | expert/prefix attention via F.sdpa | **54.3 / 56.4** | **18.4** | — | — | 0.999952 | PASS |
 
 **SDPA fix (2026-07-24, Phase D step 2):** profiling caught Inductor lowering
 the 36 vision SDPA calls to the memory-efficient backend (11.8 ms) where eager
@@ -63,3 +64,13 @@ The bar for the hand-written fused-attention kernel is no longer eager's
    (untouched by our kernels until bf16 lands), the 7 graph breaks (each a
    CPU sync + eager region), and precision (bf16 end-to-end / INT8 via
    TensorRT — Phase E).
+
+**Eager→SDPA routing (2026-07-24, Phase D step 3a):** lerobot's expert/prefix
+attention is hand-written (fp32-upcast QK^T → where(mask) → softmax → PV, 176
+sites). Op-level measurement showed F.sdpa 3–6× faster at those shapes; the
+routing context (`vla/variants.py`) swaps the class's eager_attention_forward
+for an sdpa call preserving mask semantics and GQA expansion. −11.8 ms — more
+than the softmax/round-trip estimate, because the eager path's explicit fp32
+upcast was also running the attention GEMMs on CUDA cores; sdpa runs them on
+bf16 tensor cores with internal fp32 accumulation. Cumulative: eager 198.4 →
+54.3 ms (3.65×) at accuracy retention 0.99995.

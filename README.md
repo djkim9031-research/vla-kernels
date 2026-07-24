@@ -37,13 +37,15 @@ rather than microbenchmarks alone.
   `torch.compile(fullgraph=True)`. Nsight counters back every claim.
   → [docs/softmax.md](docs/softmax.md)
 - *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → 73.8 ms with
-  torch.compile + CUDA Graphs → **66.1 ms (3.0×, 15.1 Hz) after profiling
-  exposed an SDPA backend regression** — Inductor lowered the vision
-  attention to the memory-efficient kernel (3.2× slower than flash) because
-  a provably all-ones mask gets materialized under tracing; nulling it at
-  the source recovered 7.9 ms with zero kernel code. Accuracy retention
-  0.99995, gate PASS. The per-op softmax swap alone is −3%: fusion
-  granularity, not op substitution, is what survives end-to-end.
+  torch.compile + CUDA Graphs → **54.3 ms (3.65×, 18.4 Hz) after two
+  profiling-driven attention fixes**: an SDPA backend regression (Inductor
+  picked the memory-efficient kernel over flash because a provably all-ones
+  vision mask gets materialized under tracing; −7.9 ms) and routing the
+  model's hand-written fp32 eager attention to F.sdpa (−11.8 ms — the
+  explicit fp32 upcast had been running attention GEMMs on CUDA cores).
+  Accuracy retention 0.99995, gate PASS, zero kernel code. The per-op
+  softmax swap alone is −3%: fusion granularity, not op substitution, is
+  what survives end-to-end.
   → [results/e2e_comparison.md](results/e2e_comparison.md),
   [results/attention_budget.md](results/attention_budget.md)
 

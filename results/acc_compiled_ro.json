@@ -1,9 +1,9 @@
 {
   "variant": "compiled-ro",
   "numerical_parity": {
-    "max_abs_err": 0.08339250087738037,
-    "mse": 0.00013060671335551888,
-    "cosine": 0.9999529123306274,
+    "max_abs_err": 0.06438815593719482,
+    "mse": 0.00012514441914390773,
+    "cosine": 0.9999523162841797,
     "retention_gate_99": true
   }
 }

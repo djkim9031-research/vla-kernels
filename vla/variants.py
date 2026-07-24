@@ -67,6 +67,60 @@ def _vision_mask_none():
         mm.create_bidirectional_mask = orig
 
 
+@contextlib.contextmanager
+def _route_eager_to_sdpa():
+    """Route the expert/prefix eager attention (176 sites) to F.sdpa.
+
+    lerobot's SmolVLMWithExpertModel implements attention manually:
+    fp32-upcast QK^T -> where(mask, scores, big_neg) -> softmax -> PV, with a
+    (B, Sq, Sk) bool mask. Op-level measurement showed F.sdpa 3-6x faster at
+    these exact shapes (the mem-efficient backend accepts bool masks; it
+    accumulates in fp32 internally, replacing the explicit upcast). GQA k/v
+    expansion is kept explicit — sdpa's enable_gqa falls back to the math
+    backend when a mask is present.
+
+    Applied to compiled variants only, so `original` remains the untouched
+    eager baseline.
+    """
+    try:
+        from lerobot.policies.smolvla import smolvlm_with_expert as swe
+    except ImportError:
+        yield
+        return
+    import torch.nn.functional as F
+
+    def sdpa_forward(self, attention_mask, batch_size, head_dim,
+                     query_states, key_states, value_states):
+        n_heads = self.num_attention_heads
+        n_kv = self.num_key_value_heads
+        groups = n_heads // n_kv
+        seq_k = key_states.shape[1]
+        if groups > 1:  # GQA: expand k/v to full head count, like the eager path
+            key_states = key_states[:, :, :, None, :].expand(
+                batch_size, seq_k, n_kv, groups, head_dim).reshape(
+                batch_size, seq_k, n_heads, head_dim)
+            value_states = value_states[:, :, :, None, :].expand(
+                batch_size, seq_k, n_kv, groups, head_dim).reshape(
+                batch_size, seq_k, n_heads, head_dim)
+        # callers mix dtypes (bf16 q, fp32 cached k/v) — the eager path upcast
+        # everything to fp32; sdpa needs uniform dtype, unify at q's
+        q = query_states.transpose(1, 2)
+        k = key_states.to(query_states.dtype).transpose(1, 2)
+        v = value_states.to(query_states.dtype).transpose(1, 2)
+        out = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=attention_mask[:, None, :, :],
+            scale=head_dim ** -0.5)
+        return out.transpose(1, 2).reshape(batch_size, -1, n_heads * head_dim)
+
+    cls = swe.SmolVLMWithExpertModel
+    orig = cls.eager_attention_forward
+    cls.eager_attention_forward = sdpa_forward
+    try:
+        yield
+    finally:
+        cls.eager_attention_forward = orig
+
+
 def _stack(*ctxs):
     es = contextlib.ExitStack()
 
@@ -97,7 +151,8 @@ def make_infer(policy, variant: str):
                       use_custom_kernels(True)), base
     if variant in ("compiled", "compiled-ro"):
         mode = "reduce-overhead" if variant == "compiled-ro" else None
-        return _stack(_sdpa_flash_first(), _vision_mask_none()), \
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _route_eager_to_sdpa()), \
             torch.compile(base, mode=mode)
     raise ValueError(f"unknown variant {variant!r}")
 
