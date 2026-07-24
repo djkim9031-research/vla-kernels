@@ -1,2 +1,2 @@
 variant,p50_ms,p99_ms,mean_ms,hz,first_call_s,graph_breaks,unique_graphs
-compiled-ro,73.829,82.024,72.824,13.5,189.9,7,11
+compiled-ro,66.105,73.306,64.696,15.1,37.5,7,11

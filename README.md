@@ -36,12 +36,16 @@ rather than microbenchmarks alone.
   (`vlak::softmax`), it traces as one node under
   `torch.compile(fullgraph=True)`. Nsight counters back every claim.
   → [docs/softmax.md](docs/softmax.md)
-- *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → **73.8 ms with
-  torch.compile + CUDA Graphs (2.7×, MLPerf-style p90 76.4 ms, accuracy
-  retention 0.99997 — gate PASS)**. The per-op softmax swap alone is −3%:
-  fusion granularity, not op substitution, is what survives end-to-end. The
-  compiled number is the bar the hand-fused attention kernel must beat.
-  → [results/e2e_comparison.md](results/e2e_comparison.md)
+- *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → 73.8 ms with
+  torch.compile + CUDA Graphs → **66.1 ms (3.0×, 15.1 Hz) after profiling
+  exposed an SDPA backend regression** — Inductor lowered the vision
+  attention to the memory-efficient kernel (3.2× slower than flash) because
+  a provably all-ones mask gets materialized under tracing; nulling it at
+  the source recovered 7.9 ms with zero kernel code. Accuracy retention
+  0.99995, gate PASS. The per-op softmax swap alone is −3%: fusion
+  granularity, not op substitution, is what survives end-to-end.
+  → [results/e2e_comparison.md](results/e2e_comparison.md),
+  [results/attention_budget.md](results/attention_budget.md)
 
 ## Layout
 

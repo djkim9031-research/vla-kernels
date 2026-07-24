@@ -13,7 +13,17 @@ balance, so cross-day ratios are not clock-invariant.
 | original | eager PyTorch | 198.4 / 236.6 | 5.0 | 210.1 ms | 4.92 | 1.0 (ref) | — |
 | tuned | eager + fused-softmax patch | 204.6 / 215.8 | 4.9 | — | — | 0.999997 | PASS |
 | compiled | torch.compile (Inductor) | 94.3 / 108.4 | 10.6 | 85.6 ms | — | 0.999960 | PASS |
-| compiled-ro | + CUDA Graphs (reduce-overhead) | **73.8 / 82.0** | **13.5** | **76.4 ms** | **13.75** | 0.999967 | PASS |
+| compiled-ro | + CUDA Graphs (reduce-overhead) | 73.8 / 82.0 | 13.5 | 76.4 ms | 13.75 | 0.999967 | PASS |
+| compiled-ro + SDPA fix | + flash-pinned vision attention | **66.1 / 73.3** | **15.1** | — | — | 0.999953 | PASS |
+
+**SDPA fix (2026-07-24, Phase D step 2):** profiling caught Inductor lowering
+the 36 vision SDPA calls to the memory-efficient backend (11.8 ms) where eager
+dispatches flash (3.1 ms). Root cause: SmolVLM manufactures an all-ones patch
+mask; eager's all-ones shortcut drops it (flash eligible) but tracing must
+materialize it (flash disqualified). Since the mask is all-ones by
+construction for fixed cameras, `vla/variants.py` nulls it at the source
+(`create_bidirectional_mask` → None) and pins flash-first backend priority.
+−7.9 ms for zero kernel code; flash_fwd verified in the profile.
 
 All LoadGen results VALID (SingleStream 60 s window; Offline 330 queries for
 original, 850 for compiled-ro at its higher rate).
