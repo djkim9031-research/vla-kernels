@@ -15,6 +15,7 @@
 #include <cuda_runtime.h>
 #include <mma.h>
 #include <cuda_bf16.h>
+#include <cuda_pipeline.h>
 #include <cfloat>
 #include "../common/cuda_utils.cuh"
 
@@ -84,7 +85,13 @@ __global__ void fused_attention_warp_row(
 // in smem between the two matmuls. The score tile never touches HBM; the
 // bool mask is read once per tile and fused into the stats pass.
 constexpr int BM = 64, BN = 64, LD = 80;    // LD: smem leading dim (16-elem aligned)
-constexpr int V2_THREADS = 128;             // 4 warps x 16 query rows
+constexpr int V2_THREADS = 256;             // 8 warps: 4 run wmma, all 8 load + softmax
+
+// 16-byte async copy into smem (cp.async on sm80+): the enabler for
+// double-buffered K/V — the next tile streams in while this one computes
+__device__ __forceinline__ void cpa16(void* dst, const void* src) {
+  __pipeline_memcpy_async(dst, src, 16);
+}
 
 using nvcuda::wmma::fragment;
 using nvcuda::wmma::matrix_a;
@@ -98,25 +105,27 @@ using nvcuda::wmma::fill_fragment;
 using nvcuda::wmma::mma_sync;
 using nvcuda::wmma::mem_row_major;
 
+template <int BMT>
 __global__ void fused_attention_wmma_bf16(
     const __nv_bfloat16* __restrict__ q, const __nv_bfloat16* __restrict__ k,
     const __nv_bfloat16* __restrict__ v, __nv_bfloat16* __restrict__ o,
     const bool* __restrict__ mask, int H, int BH, int M, int N, float scale) {
   extern __shared__ unsigned char smem_raw[];
-  __nv_bfloat16* Qs = (__nv_bfloat16*)smem_raw;                    // BM x LD
-  __nv_bfloat16* Kt = Qs + BM * LD;                                // BN x LD
-  __nv_bfloat16* Vt = Kt + BN * LD;                                // BN x LD
-  __nv_bfloat16* Pb = Vt + BN * LD;                                // BM x LD
-  float* S  = (float*)(Pb + BM * LD);                              // BM x LD
-  float* Oa = S + BM * LD;                                         // BM x LD
-  float* mrun = Oa + BM * LD;                                      // BM
-  float* lrun = mrun + BM;                                         // BM
-  float* pmax = lrun + BM;                                         // BM x 2
-  float* psum = pmax + 2 * BM;                                     // BM x 2
+  constexpr int TPR = V2_THREADS / BMT;      // scalar threads per query row
+  __nv_bfloat16* Qs = (__nv_bfloat16*)smem_raw;                    // BMT x LD
+  __nv_bfloat16* Kt[2] = {Qs + BMT * LD, Qs + BMT * LD + BN * LD}; // double-buffered
+  __nv_bfloat16* Vt[2] = {Kt[1] + BN * LD, Kt[1] + 2 * BN * LD};
+  __nv_bfloat16* Pb = Vt[1] + BN * LD;                             // BMT x LD
+  float* S  = (float*)(Pb + BMT * LD);                             // BMT x LD
+  float* Oa = S + BMT * LD;                                        // BMT x LD
+  float* mrun = Oa + BMT * LD;                                     // BMT
+  float* lrun = mrun + BMT;                                        // BMT
+  float* pmax = lrun + BMT;                                        // BMT x TPR
+  float* psum = pmax + TPR * BMT;                                  // BMT x TPR
 
-  int tiles_m = (M + BM - 1) / BM;
+  int tiles_m = (M + BMT - 1) / BMT;
   int bh = blockIdx.x / tiles_m;
-  int m0 = (blockIdx.x % tiles_m) * BM;                            // first q row
+  int m0 = (blockIdx.x % tiles_m) * BMT;                            // first q row
   int tid = threadIdx.x, warp = tid / 32;
 
   const __nv_bfloat16* qb = q + (size_t)bh * M * HEAD_DIM;
@@ -125,102 +134,124 @@ __global__ void fused_attention_wmma_bf16(
   const bool* mb = mask ? mask + (size_t)(bh / H) * M * N : nullptr;
 
   // load Q tile (zero-pad rows beyond M); init stats and O accumulator
-  for (int i = tid; i < BM * HEAD_DIM; i += V2_THREADS) {
+  for (int i = tid; i < BMT * HEAD_DIM; i += V2_THREADS) {
     int r = i / HEAD_DIM, c = i % HEAD_DIM;
     Qs[r * LD + c] = (m0 + r < M) ? qb[(size_t)(m0 + r) * HEAD_DIM + c]
                                   : __float2bfloat16(0.f);
   }
-  for (int i = tid; i < BM * HEAD_DIM; i += V2_THREADS) Oa[(i / HEAD_DIM) * LD + i % HEAD_DIM] = 0.f;
-  if (tid < BM) { mrun[tid] = -FLT_MAX; lrun[tid] = 0.f; }
-  __syncthreads();
+  for (int i = tid; i < BMT * HEAD_DIM; i += V2_THREADS) Oa[(i / HEAD_DIM) * LD + i % HEAD_DIM] = 0.f;
+  if (tid < BMT) { mrun[tid] = -FLT_MAX; lrun[tid] = 0.f; }
 
-  for (int n0 = 0; n0 < N; n0 += BN) {
-    // stage K/V tiles (zero-pad cols beyond N)
-    for (int i = tid; i < BN * HEAD_DIM; i += V2_THREADS) {
-      int r = i / HEAD_DIM, c = i % HEAD_DIM;
-      bool ok = n0 + r < N;
-      Kt[r * LD + c] = ok ? kb[(size_t)(n0 + r) * HEAD_DIM + c] : __float2bfloat16(0.f);
-      Vt[r * LD + c] = ok ? vb[(size_t)(n0 + r) * HEAD_DIM + c] : __float2bfloat16(0.f);
+  // async prefetch of one K/V tile into buffer `buf` (8 x 16B chunks per row;
+  // rows past N are zero-filled synchronously)
+  auto prefetch = [&](int n0, int buf) {
+    for (int ch = tid; ch < BN * 8; ch += V2_THREADS) {
+      int r = ch / 8, seg = ch % 8;
+      if (n0 + r < N) {
+        cpa16(Kt[buf] + r * LD + seg * 8, kb + (size_t)(n0 + r) * HEAD_DIM + seg * 8);
+        cpa16(Vt[buf] + r * LD + seg * 8, vb + (size_t)(n0 + r) * HEAD_DIM + seg * 8);
+      } else {
+        float4 z = {0.f, 0.f, 0.f, 0.f};
+        *(float4*)(Kt[buf] + r * LD + seg * 8) = z;
+        *(float4*)(Vt[buf] + r * LD + seg * 8) = z;
+      }
+    }
+    __pipeline_commit();
+  };
+
+  prefetch(0, 0);
+  int n_tiles = (N + BN - 1) / BN;
+
+  for (int t = 0; t < n_tiles; ++t) {
+    int n0 = t * BN, cur = t & 1;
+    if (t + 1 < n_tiles) {
+      prefetch(n0 + BN, cur ^ 1);       // next tile streams while this computes
+      __pipeline_wait_prior(1);         // current tile's copies done
+    } else {
+      __pipeline_wait_prior(0);
     }
     __syncthreads();
 
-    // S(64x64) = Q @ K^T on tensor cores; each warp owns 16 rows
-    for (int nf = 0; nf < 4; ++nf) {
+    // S(BMT x 64) = Q @ K^T: (row-frag x col-frag) jobs spread over all 8 warps
+    for (int job = warp; job < (BMT / 16) * 4; job += V2_THREADS / 32) {
+      int rf = job / 4, nf = job % 4;
       fragment<accumulator, 16, 16, 16, float> acc;
       fill_fragment(acc, 0.f);
       for (int kf = 0; kf < 4; ++kf) {
         fragment<matrix_a, 16, 16, 16, __nv_bfloat16, row_major> af;
         fragment<matrix_b, 16, 16, 16, __nv_bfloat16, col_major> bf;
-        load_matrix_sync(af, Qs + warp * 16 * LD + kf * 16, LD);
-        load_matrix_sync(bf, Kt + nf * 16 * LD + kf * 16, LD);   // K^T via col_major
+        load_matrix_sync(af, Qs + rf * 16 * LD + kf * 16, LD);
+        load_matrix_sync(bf, Kt[cur] + nf * 16 * LD + kf * 16, LD);  // K^T via col_major
         mma_sync(acc, af, bf, acc);
       }
-      store_matrix_sync(S + warp * 16 * LD + nf * 16, acc, LD, mem_row_major);
+      store_matrix_sync(S + rf * 16 * LD + nf * 16, acc, LD, mem_row_major);
     }
     __syncthreads();
 
-    // scalar phase, parallel over all 128 threads: 2 threads per query row,
-    // each owning a 32-column half — mask+max, then exp/P/O-rescale, then one
-    // thread commits the merged (m,l). Three cheap barriers replace the old
-    // single-thread 64+64-element serial crawl.
+    // scalar phase over all 256 threads: TPR threads per query row — mask+max,
+    // then exp/P/O-rescale, then one thread commits the merged (m,l).
     {
-      int r = tid / 2, half = tid % 2, c0 = half * (BN / 2);
+      int r = tid / TPR, quart = tid % TPR, c0 = quart * (BN / TPR);
       int grow = m0 + r;
       const bool* mr = (mb && grow < M) ? mb + (size_t)grow * N + n0 : nullptr;
       bool row_ok = grow < M;
 
       float tmax = -FLT_MAX;
-      for (int c = c0; c < c0 + BN / 2; ++c) {
+      for (int c = c0; c < c0 + BN / TPR; ++c) {
         bool valid = row_ok && (n0 + c < N) && (!mr || mr[c]);
         float val = valid ? S[r * LD + c] * scale : -FLT_MAX;
         S[r * LD + c] = val;
         tmax = fmaxf(tmax, val);
       }
-      pmax[r * 2 + half] = tmax;
+      pmax[r * TPR + quart] = tmax;
       __syncthreads();
 
-      float m_new = fmaxf(mrun[r], fmaxf(pmax[r * 2], pmax[r * 2 + 1]));
+      float m_new = mrun[r];
+      for (int i = 0; i < TPR; ++i) m_new = fmaxf(m_new, pmax[r * TPR + i]);
       float alpha = 1.f, lsum = 0.f;
       if (row_ok && m_new > -FLT_MAX) {
         alpha = expf(mrun[r] - m_new);
-        for (int c = c0; c < c0 + BN / 2; ++c) {
+        for (int c = c0; c < c0 + BN / TPR; ++c) {
           float p = expf(S[r * LD + c] - m_new);     // exp(-inf)=0 for masked
           Pb[r * LD + c] = __float2bfloat16(p);
           lsum += p;
         }
-        for (int d = half * (HEAD_DIM / 2); d < (half + 1) * (HEAD_DIM / 2); ++d)
+        for (int d = quart * (HEAD_DIM / TPR); d < (quart + 1) * (HEAD_DIM / TPR); ++d)
           Oa[r * LD + d] *= alpha;
       } else {
-        for (int c = c0; c < c0 + BN / 2; ++c) Pb[r * LD + c] = __float2bfloat16(0.f);
+        for (int c = c0; c < c0 + BN / TPR; ++c) Pb[r * LD + c] = __float2bfloat16(0.f);
       }
-      psum[r * 2 + half] = lsum;
+      psum[r * TPR + quart] = lsum;
       __syncthreads();
 
-      if (half == 0 && row_ok && m_new > -FLT_MAX) {
-        lrun[r] = lrun[r] * alpha + psum[r * 2] + psum[r * 2 + 1];
+      if (quart == 0 && row_ok && m_new > -FLT_MAX) {
+        float ls = 0.f;
+        for (int i = 0; i < TPR; ++i) ls += psum[r * TPR + i];
+        lrun[r] = lrun[r] * alpha + ls;
         mrun[r] = m_new;
       }
     }
     __syncthreads();
 
-    // O(64x64) += P @ V on tensor cores
-    for (int nf = 0; nf < 4; ++nf) {
+    // O(BMT x 64) += P @ V: jobs spread over all warps
+    for (int job = warp; job < (BMT / 16) * 4; job += V2_THREADS / 32) {
+      int rf = job / 4, nf = job % 4;
       fragment<accumulator, 16, 16, 16, float> acc;
-      load_matrix_sync(acc, Oa + warp * 16 * LD + nf * 16, LD, mem_row_major);
+      load_matrix_sync(acc, Oa + rf * 16 * LD + nf * 16, LD, mem_row_major);
       for (int kf = 0; kf < 4; ++kf) {
         fragment<matrix_a, 16, 16, 16, __nv_bfloat16, row_major> af;
         fragment<matrix_b, 16, 16, 16, __nv_bfloat16, row_major> bf;
-        load_matrix_sync(af, Pb + warp * 16 * LD + kf * 16, LD);
-        load_matrix_sync(bf, Vt + kf * 16 * LD + nf * 16, LD);
+        load_matrix_sync(af, Pb + rf * 16 * LD + kf * 16, LD);
+        load_matrix_sync(bf, Vt[cur] + kf * 16 * LD + nf * 16, LD);
         mma_sync(acc, af, bf, acc);
       }
-      store_matrix_sync(Oa + warp * 16 * LD + nf * 16, acc, LD, mem_row_major);
+      store_matrix_sync(Oa + rf * 16 * LD + nf * 16, acc, LD, mem_row_major);
     }
     __syncthreads();
   }
 
   // write out: O / l
-  if (tid < BM) {
+  if (tid < BMT) {
     int r = tid, grow = m0 + r;
     if (grow < M) {
       float inv = 1.f / lrun[r];
@@ -231,8 +262,10 @@ __global__ void fused_attention_wmma_bf16(
   }
 }
 
-constexpr size_t V2_SMEM =
-    (4 * BM * LD) * sizeof(__nv_bfloat16) + (2 * BM * LD + 6 * BM) * sizeof(float);
+constexpr size_t v2_smem(int bmt) {
+  return (size_t)(2 * bmt + 4 * BN) * LD * sizeof(__nv_bfloat16) +
+         ((size_t)2 * bmt * LD + 2 * (V2_THREADS / 32) * bmt + 2 * bmt) * sizeof(float);
+}
 
 }  // namespace
 
@@ -263,17 +296,29 @@ torch::Tensor fused_attention(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   float sc = scale > 0 ? (float)scale : 1.f / sqrtf((float)HEAD_DIM);
 
   if (q.scalar_type() == torch::kBFloat16) {   // v2: tensor-core path
+    // small-M sites get BMT=32: doubles the grid (fills SMs) + halves Q/S/O smem
+    bool small = M <= 96;
     static bool smem_ok = [] {
-      return cudaFuncSetAttribute(fused_attention_wmma_bf16,
-                                  cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                  V2_SMEM) == cudaSuccess;
+      bool a = cudaFuncSetAttribute(fused_attention_wmma_bf16<32>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize, v2_smem(32)) == cudaSuccess;
+      bool b = cudaFuncSetAttribute(fused_attention_wmma_bf16<64>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize, v2_smem(64)) == cudaSuccess;
+      return a && b;
     }();
-    TORCH_CHECK(smem_ok, "failed to reserve ", V2_SMEM, "B dynamic smem");
-    int tiles_m = (M + BM - 1) / BM;
-    fused_attention_wmma_bf16<<<BH * tiles_m, V2_THREADS, V2_SMEM>>>(
-        (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
-        (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
-        mp, H, BH, M, N, sc);
+    TORCH_CHECK(smem_ok, "failed to reserve dynamic smem for v2");
+    if (small) {
+      int tiles_m = (M + 31) / 32;
+      fused_attention_wmma_bf16<32><<<BH * tiles_m, V2_THREADS, v2_smem(32)>>>(
+          (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
+          (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
+          mp, H, BH, M, N, sc);
+    } else {
+      int tiles_m = (M + 63) / 64;
+      fused_attention_wmma_bf16<64><<<BH * tiles_m, V2_THREADS, v2_smem(64)>>>(
+          (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
+          (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
+          mp, H, BH, M, N, sc);
+    }
   } else {                                     // v1: scalar warp-per-row path
     int threads = 128;
     int rows_per_block = threads / WARP_SIZE;
