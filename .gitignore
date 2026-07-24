@@ -10,4 +10,4 @@ build/
 results/*.log
 .venv/
 .torch_ext_cache/
-.inductor_cache/
+.inductor_cache*/
