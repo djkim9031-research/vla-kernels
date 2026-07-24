@@ -22,10 +22,22 @@ TOL = {torch.float32: (2e-5, 2e-5), torch.float16: (2e-3, 2e-3),
        torch.bfloat16: (2e-2, 2e-2)}
 
 
-def ref_sdpa(q, k, v):
-    # math oracle in fp32
+def ref_sdpa(q, k, v, mask=None):
+    # math oracle in fp32; mask: (B, M, N) bool, True = attend
     s = (q.float() @ k.float().transpose(-1, -2)) / math.sqrt(q.size(-1))
+    if mask is not None:
+        s = s.masked_fill(~mask[:, None], float("-inf"))
     return (torch.softmax(s, dim=-1) @ v.float()).to(q.dtype)
+
+
+def smolvla_mask(B, M, N, prefix):
+    """The prefix-bidirectional + causal-suffix pattern (True = attend)."""
+    m = torch.zeros(M, N, dtype=torch.bool, device="cuda")
+    m[:, :prefix] = True
+    start = N - M
+    for i in range(M):
+        m[i, prefix:start + i + 1] = True
+    return m[None].expand(B, M, N).contiguous()
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -49,6 +61,37 @@ def test_matches_torch_sdpa_backend():
     torch.testing.assert_close(fused_attention(q, k, v),
                                F.scaled_dot_product_attention(q, k, v),
                                rtol=2e-5, atol=2e-5)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@pytest.mark.parametrize("shape,prefix", [
+    ((1, 15, 50, 291), 241),   # expert sites with the real mask pattern
+    ((1, 15, 50, 241), 191),
+    ((1, 15, 241, 241), 241),  # prefix site (fully bidirectional)
+    ((2, 4, 33, 65), 32),      # odd sizes crossing tile boundaries
+])
+def test_masked_matches_reference(dtype, shape, prefix):
+    torch.manual_seed(5)
+    B, H, M, N = shape
+    q = torch.randn(B, H, M, 64, device="cuda", dtype=dtype)
+    k = torch.randn(B, H, N, 64, device="cuda", dtype=dtype)
+    v = torch.randn(B, H, N, 64, device="cuda", dtype=dtype)
+    mask = smolvla_mask(B, M, N, prefix)
+    out = fused_attention(q, k, v, attn_mask=mask)
+    rtol, atol = TOL[dtype]
+    torch.testing.assert_close(out, ref_sdpa(q, k, v, mask), rtol=rtol, atol=atol)
+
+
+def test_masked_matches_torch_sdpa():
+    torch.manual_seed(6)
+    q = torch.randn(1, 15, 50, 64, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(1, 15, 291, 64, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn(1, 15, 291, 64, device="cuda", dtype=torch.bfloat16)
+    mask = smolvla_mask(1, 50, 291, 241)
+    torch.testing.assert_close(
+        fused_attention(q, k, v, attn_mask=mask),
+        F.scaled_dot_product_attention(q, k, v, attn_mask=mask[:, None]),
+        rtol=2e-2, atol=2e-2)
 
 
 def test_custom_scale():

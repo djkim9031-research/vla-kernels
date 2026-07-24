@@ -24,7 +24,7 @@ def _ext():
         verbose=bool(int(os.environ.get("VLAK_VERBOSE", "0"))),
     )
     torch.library.register_fake("vlak::fused_attention")(
-        lambda q, k, v, scale=-1.0: torch.empty_like(q))
+        lambda q, k, v, scale=-1.0, attn_mask=None: torch.empty_like(q))
     return ext
 
 
@@ -39,8 +39,13 @@ def _ensure_registered():
 
 
 def fused_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-                    scale: float | None = None) -> torch.Tensor:
-    """Non-causal SDPA for (B, H, M, 64) tensors; scores never touch HBM."""
+                    scale: float | None = None,
+                    attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    """SDPA for (B, H, M, 64) tensors; scores never touch HBM.
+
+    attn_mask: optional (B, M, N) bool, broadcast over heads (True = attend).
+    bf16 inputs take the tensor-core WMMA path; other dtypes the scalar path.
+    """
     _ensure_registered()
-    return torch.ops.vlak.fused_attention(q, k, v,
-                                          -1.0 if scale is None else scale)
+    return torch.ops.vlak.fused_attention(
+        q, k, v, -1.0 if scale is None else scale, attn_mask)
