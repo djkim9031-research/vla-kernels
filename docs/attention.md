@@ -1,24 +1,41 @@
 # Kernel #2 — Fused Masked Attention (tensor cores)
 
 A hand-written scaled-dot-product-attention kernel for the niche PyTorch's
-backends serve worst: **attention with a custom block mask** — the pattern
-SmolVLA's prefix/expert layers require (bidirectional prefix + causal action
-suffix), which disqualifies flash and forces the memory-efficient backend.
+backends serve worst: **attention with a custom mask** — which every
+prefix/expert site in SmolVLA carries (a padded-language dead band in all of
+them, plus a causal action staircase in the joint layers), disqualifying
+flash and forcing the memory-efficient backend.
 
-Result at the model's masked expert sites (bf16, head_dim 64, batch 1,
-Jetson Thor, locked clocks; 300-iter averages):
+Results at the model's REAL masks (extracted from a live inference —
+`results/real_masks.pt` — not reconstructed; bf16, head_dim 64, Jetson Thor,
+7 repetitions × 200-iter averages):
 
-| site (B,H,M,N) | F.sdpa (mem-efficient, masked) | ours | speedup |
-|---|---|---|---|
-| (1,15,50,241) ×80/inference | 40.7 µs | **31.3 µs** | **1.30×** |
-| (1,15,50,291) ×80/inference | 40.6 µs | **37.2 µs** | **1.09×** |
-| (1,15,241,241) ×16/inference | 47.2 µs | 142.1 µs | 0.33× — see routing |
+| site (B,H,M,N) | metric | F.sdpa (mem-efficient) | ours | verdict |
+|---|---|---|---|---|
+| (1,15,50,241) ×80/inf | median | 60.4 µs | **33.3 µs** | **1.8× faster** |
+| | best-case | 48.8 µs | 33.2 µs | 1.5× faster |
+| (1,15,50,291) ×80/inf | median | 40.6 µs | 39.2 µs | parity (1.04×) |
+| | worst-case | **110.0 µs** | **40.9 µs** | **2.7× tighter tail** |
+| (1,15,241,241) ×16/inf | median | ~69 µs | 150 µs | theirs — routed to F.sdpa |
 
-The prefix site (241×241) is not our kernel's to win: its mask is all-True
-by construction at fixed shapes, so the correct treatment is dropping the
-mask and letting **flash** run it (14.5 µs — 3.3× faster than masked SDPA).
-Full routing: vision → flash, prefix → flash (mask dropped), expert sites →
-`vlak::fused_attention`, anything off-envelope → F.sdpa.
+The stability column matters as much as the speed column for a robot control
+loop: across every session and mask, our kernel holds a ~2 µs spread while
+the mem-efficient backend's masked path swings 40–110 µs.
+
+Verified mask census (one live inference, all sites): every expert/prefix
+mask contains a never-visible column band (the padded language slots — cols
+196–239 for this task string), so **flash is legitimately ineligible at all
+of them**; the joint sites additionally carry the causal action staircase
+(verified equal to tril). Routing: vision → flash (all-ones patch mask
+dropped — the one genuinely ceremonial mask, fixed earlier); both expert
+sites → `vlak::fused_attention`; prefix → F.sdpa.
+
+**Corrections history (2026-07-24):** an earlier revision claimed 1.30× at
+(50,241) under a synthetic staircase mask (prefix=191) that does not occur
+in the model, and asserted the prefix/cross masks were all-True "by
+construction" — forgetting that the language block is padded. Both claims
+are withdrawn and replaced by the real-mask measurements above. Lesson
+recorded below.
 
 ## Design
 
@@ -83,10 +100,27 @@ structure first, speed after — same method as softmax v0→v4.)
    any N not divisible by the tile width. Caught by the exact-equivalence
    test between the analytic and tensor-mask paths — bit-identical outputs
    are a stronger oracle than tolerance comparisons.
-6. **Not every site is yours to win.** The prefix site's all-True mask
-   means flash — once un-blocked — beats everything by 3×+. Routing beats
-   heroics; the kernel keeps only the sites where it is the measured
-   winner.
+6. **Not every site is yours to win.** At the prefix's 241×241 shape the
+   mem-efficient backend beats us ~2×; it keeps that site. Routing beats
+   heroics; the kernel keeps only the sites where it is the measured winner.
+7. **Benchmark the model's inputs, not your reconstruction of them.** Two
+   published claims died to this: a synthetic staircase mask at a shape
+   where the model uses a different pattern, and an "all-True by
+   construction" argument that forgot the language padding. The fix that
+   made claims durable: extract the masks from a live inference and assert
+   their structure (column dead-bands, tril staircase) before benchmarking
+   against them.
+8. **Report tails, not just medians.** The masked mem-efficient path is
+   bimodal (40–110 µs across sessions); ours is flat. Median-only reporting
+   would have hidden the most deployment-relevant difference.
+
+## Analytic-mask caveat
+
+The `prefix_len` analytic path models the idealized no-padding pattern and
+does NOT represent the deployed masks (which carry the pad dead band); the
+real sites are served through the tensor-mask path. Extending the analytic
+form with a second boundary (real-language end + state column) is queued —
+the pattern remains arithmetic.
 
 ## Envelope
 
