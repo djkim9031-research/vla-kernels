@@ -8,6 +8,7 @@
 // Math is always accumulated in fp32 (even for fp16 input) for numerical parity
 // with torch.softmax.
 #include <torch/extension.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 #include <cfloat>
 #include "../common/cuda_utils.cuh"
@@ -267,26 +268,26 @@ torch::Tensor softmax_lastdim(torch::Tensor x, int64_t version) {
         if (version == 0) {
           int threads = 128;
           int blocks = (rows + threads - 1) / threads;
-          softmax_v0<scalar_t><<<blocks, threads>>>(xp, yp, rows, cols);
+          softmax_v0<scalar_t><<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(xp, yp, rows, cols);
         } else if (version == 1) {
           int threads = 128;                       // 4 warps -> 4 rows / block
           int rows_per_block = threads / WARP_SIZE;
           int blocks = (rows + rows_per_block - 1) / rows_per_block;
-          softmax_v1<scalar_t><<<blocks, threads>>>(xp, yp, rows, cols);
+          softmax_v1<scalar_t><<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(xp, yp, rows, cols);
         } else if (version == 2) {
           int threads = 256;
           size_t shmem = n_warps_for(threads) * sizeof(float);
-          softmax_v2<scalar_t><<<rows, threads, shmem>>>(xp, yp, rows, cols);
+          softmax_v2<scalar_t><<<rows, threads, shmem, c10::cuda::getCurrentCUDAStream()>>>(xp, yp, rows, cols);
         } else if (version == 3) {
           int threads = 256;
           size_t shmem = n_warps_for(threads) * sizeof(float);
-          softmax_v3<scalar_t><<<rows, threads, shmem>>>(xp, yp, rows, cols);
+          softmax_v3<scalar_t><<<rows, threads, shmem, c10::cuda::getCurrentCUDAStream()>>>(xp, yp, rows, cols);
         } else {  // version 4 — fused (m,l) + raking; registers when row fits
           constexpr int BLOCK = 256, RPT = 8;
           if (cols <= BLOCK * RPT)
-            softmax_v4_reg<scalar_t, BLOCK, RPT><<<rows, BLOCK>>>(xp, yp, rows, cols);
+            softmax_v4_reg<scalar_t, BLOCK, RPT><<<rows, BLOCK, 0, c10::cuda::getCurrentCUDAStream()>>>(xp, yp, rows, cols);
           else
-            softmax_v4_stream<scalar_t, BLOCK><<<rows, BLOCK>>>(xp, yp, rows, cols);
+            softmax_v4_stream<scalar_t, BLOCK><<<rows, BLOCK, 0, c10::cuda::getCurrentCUDAStream()>>>(xp, yp, rows, cols);
         }
       });
   cudaError_t launch_err = cudaGetLastError();

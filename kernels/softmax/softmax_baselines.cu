@@ -6,7 +6,7 @@
 //             the reductions — library primitives vs the hand-rolled ones in
 //             cuda_utils.cuh.
 #include <torch/extension.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 #include <cudnn.h>
 #include <cub/block/block_reduce.cuh>
@@ -28,7 +28,7 @@ torch::Tensor softmax_cudnn(torch::Tensor x) {
 
   static cudnnHandle_t handle = nullptr;
   if (!handle) CUDNN_CHECK(cudnnCreate(&handle));
-  CUDNN_CHECK(cudnnSetStream(handle, at::cuda::getCurrentCUDAStream()));
+  CUDNN_CHECK(cudnnSetStream(handle, c10::cuda::getCurrentCUDAStream()));
 
   // cache the descriptor for the last shape/dtype (bench reuses one shape)
   static cudnnTensorDescriptor_t desc = nullptr;
@@ -107,7 +107,7 @@ torch::Tensor softmax_cub(torch::Tensor x) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       x.scalar_type(), "softmax_cub", [&] {
-    softmax_cub_kernel<scalar_t, BLOCK><<<rows, BLOCK>>>(
+    softmax_cub_kernel<scalar_t, BLOCK><<<rows, BLOCK, 0, c10::cuda::getCurrentCUDAStream()>>>(
         x.data_ptr<scalar_t>(), y.data_ptr<scalar_t>(), rows, cols);
   });
   cudaError_t err = cudaGetLastError();

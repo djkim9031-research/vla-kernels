@@ -45,8 +45,9 @@ def _ext():
     )
     # loading the .so ran TORCH_LIBRARY(vlak): register the fake (meta) impl
     # so FakeTensor tracing (torch.compile / torch.export) can shape-infer it
+    # contiguous-stride promise, matching the real kernel's output
     torch.library.register_fake("vlak::softmax")(
-        lambda x, version=4: torch.empty_like(x))
+        lambda x, version=4: torch.empty(x.shape, dtype=x.dtype, device=x.device))
     return ext
 
 

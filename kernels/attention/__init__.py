@@ -23,9 +23,12 @@ def _ext():
         extra_cuda_cflags=["-O3", "-arch=native", "--use_fast_math"],
         verbose=bool(int(os.environ.get("VLAK_VERBOSE", "0"))),
     )
+    # the real kernel contiguous()-izes and returns a CONTIGUOUS tensor; the
+    # fake must promise the same strides (empty_like would inherit the input's
+    # view strides and make Inductor plan around a layout we never produce)
     torch.library.register_fake("vlak::fused_attention")(
         lambda q, k, v, scale=-1.0, attn_mask=None, prefix_len=-1:
-            torch.empty_like(q))
+            torch.empty(q.shape, dtype=q.dtype, device=q.device))
     return ext
 
 

@@ -12,6 +12,7 @@
 // re-read per query row (L2 absorbs the reuse across warps of the same
 // head); shared-memory K/V tiling is the planned next iteration.
 #include <torch/extension.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 #include <mma.h>
 #include <cuda_bf16.h>
@@ -347,13 +348,15 @@ torch::Tensor fused_attention(torch::Tensor q, torch::Tensor k, torch::Tensor v,
     TORCH_CHECK(smem_ok, "failed to reserve dynamic smem for v2");
     if (small) {
       int tiles_m = (M + 31) / 32;
-      fused_attention_wmma_bf16<32><<<BH * tiles_m, V2_THREADS, v2_smem(32)>>>(
+      fused_attention_wmma_bf16<32><<<BH * tiles_m, V2_THREADS, v2_smem(32),
+          c10::cuda::getCurrentCUDAStream()>>>(
           (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
           (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
           mp, (int)prefix_len, H, BH, M, N, sc);
     } else {
       int tiles_m = (M + 63) / 64;
-      fused_attention_wmma_bf16<64><<<BH * tiles_m, V2_THREADS, v2_smem(64)>>>(
+      fused_attention_wmma_bf16<64><<<BH * tiles_m, V2_THREADS, v2_smem(64),
+          c10::cuda::getCurrentCUDAStream()>>>(
           (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
           (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
           mp, (int)prefix_len, H, BH, M, N, sc);
@@ -367,7 +370,8 @@ torch::Tensor fused_attention(torch::Tensor q, torch::Tensor k, torch::Tensor v,
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16,
         q.scalar_type(), "fused_attention", [&] {
-          fused_attention_warp_row<scalar_t><<<blocks, threads>>>(
+          fused_attention_warp_row<scalar_t><<<blocks, threads, 0,
+              c10::cuda::getCurrentCUDAStream()>>>(
               q.data_ptr<scalar_t>(), k.data_ptr<scalar_t>(),
               v.data_ptr<scalar_t>(), o.data_ptr<scalar_t>(),
               mp, H, BH, M, N, sc);

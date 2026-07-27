@@ -17,7 +17,7 @@ import torch
 
 from vla.patch_kernels import use_custom_kernels
 
-VARIANTS = ["original", "tuned", "compiled", "compiled-ro"]
+VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk"]
 
 
 def _sdpa_flash_first():
@@ -121,6 +121,67 @@ def _route_eager_to_sdpa():
         cls.eager_attention_forward = orig
 
 
+@contextlib.contextmanager
+def _route_attention_vlak():
+    """Expert attention sites -> vlak::fused_attention; prefix -> F.sdpa.
+
+    Same GQA-expand/dtype-unify preamble as the sdpa routing, but the M<=96
+    sites (the expert's cross and staircase attention, with their REAL masks)
+    run our tensor-core kernel; the prefix (M=241) stays on sdpa, where the
+    mem-efficient backend beats us. The op is dispatcher-registered with a
+    fake impl, so it traces as a single node under torch.compile.
+    """
+    try:
+        from lerobot.policies.smolvla import smolvlm_with_expert as swe
+    except ImportError:
+        yield
+        return
+    import torch.nn.functional as F
+    from kernels.attention import fused_attention as vlak_attn
+
+    # warm outside tracing: JIT-build + register the op so Dynamo sees a
+    # registered custom op (and the _ensure_registered global folds away)
+    _w = torch.randn(1, 1, 32, 64, device="cuda", dtype=torch.bfloat16)
+    vlak_attn(_w, _w, _w)
+
+    def routed(self, attention_mask, batch_size, head_dim,
+               query_states, key_states, value_states):
+        n_heads = self.num_attention_heads
+        n_kv = self.num_key_value_heads
+        groups = n_heads // n_kv
+        seq_k = key_states.shape[1]
+        if groups > 1:
+            key_states = key_states[:, :, :, None, :].expand(
+                batch_size, seq_k, n_kv, groups, head_dim).reshape(
+                batch_size, seq_k, n_heads, head_dim)
+            value_states = value_states[:, :, :, None, :].expand(
+                batch_size, seq_k, n_kv, groups, head_dim).reshape(
+                batch_size, seq_k, n_heads, head_dim)
+        q = query_states.transpose(1, 2)
+        k = key_states.to(query_states.dtype).transpose(1, 2)
+        v = value_states.to(query_states.dtype).transpose(1, 2)
+        if q.shape[2] <= 96 and q.dtype == torch.bfloat16 and head_dim == 64:
+            # hand the op contiguous tensors: Inductor fuses these into the
+            # cast/expand chain, where the op's internal contiguous() would
+            # pay 3 standalone copy kernels per call
+            out = vlak_attn(q.contiguous(), k.contiguous(), v.contiguous(),
+                            scale=head_dim ** -0.5,
+                            attn_mask=attention_mask.contiguous())
+        else:
+            out = F.scaled_dot_product_attention(
+                q, k, v, attn_mask=attention_mask[:, None],
+                scale=head_dim ** -0.5)
+        return out.transpose(1, 2).reshape(batch_size, -1, n_heads * head_dim)
+
+    cls = swe.SmolVLMWithExpertModel
+    orig = cls.eager_attention_forward
+    cls.eager_attention_forward = routed
+    try:
+        yield
+    finally:
+        cls.eager_attention_forward = orig
+
+
 def _stack(*ctxs):
     es = contextlib.ExitStack()
 
@@ -154,6 +215,10 @@ def make_infer(policy, variant: str):
         return _stack(_sdpa_flash_first(), _vision_mask_none(),
                       _route_eager_to_sdpa()), \
             torch.compile(base, mode=mode)
+    if variant == "compiled-vk":   # compiled-ro + vlak attention at expert sites
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _route_attention_vlak()), \
+            torch.compile(base, mode="reduce-overhead")
     raise ValueError(f"unknown variant {variant!r}")
 
 
