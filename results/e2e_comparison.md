@@ -65,6 +65,18 @@ The bar for the hand-written fused-attention kernel is no longer eager's
    CPU sync + eager region), and precision (bf16 end-to-end / INT8 via
    TensorRT — Phase E).
 
+**Custom-kernel integration (compiled-vk, 2026-07-27, Phase D close-out):**
+routes the 160 expert attention calls to `vlak::fused_attention` inside the
+compiled graph. Correct after the stream-capture and fake-stride fixes
+(retention 0.999951, gate PASS) but slower: 63.5 ms p50 vs the same-day
+compiled-ro control at 57.8 ms. In-graph profiling attributes it: the
+mem-efficient kernel costs 21.6 µs/call under compilation (its 60 µs eager
+figure was per-call mask preparation, which compiling hoists), ours
+36.4 µs. compiled-ro stays the shipping variant; the eager-vs-in-graph
+baseline gap is written up in [docs/attention.md](../docs/attention.md).
+Day-to-day note: the 57.8 ms control vs the 54.3 ms below is thermal/clock
+drift across sessions — variants are only compared within a session.
+
 **Eager→SDPA routing (2026-07-24, Phase D step 3a):** lerobot's expert/prefix
 attention is hand-written (fp32-upcast QK^T → where(mask) → softmax → PV, 176
 sites). Op-level measurement showed F.sdpa 3–6× faster at those shapes; the

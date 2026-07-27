@@ -10,13 +10,19 @@ Results at the model's REAL masks (extracted from a live inference —
 `results/real_masks.pt` — not reconstructed; bf16, head_dim 64, Jetson Thor,
 7 repetitions × 200-iter averages):
 
-| site (B,H,M,N) | metric | F.sdpa (mem-efficient) | ours | verdict |
+| site (B,H,M,N) | metric | F.sdpa eager call (mem-efficient) | ours | verdict |
 |---|---|---|---|---|
 | (1,15,50,241) ×80/inf | median | 60.4 µs | **33.3 µs** | **1.8× faster** |
 | | best-case | 48.8 µs | 33.2 µs | 1.5× faster |
 | (1,15,50,291) ×80/inf | median | 40.6 µs | 39.2 µs | parity (1.04×) |
 | | worst-case | **110.0 µs** | **40.9 µs** | **2.7× tighter tail** |
 | (1,15,241,241) ×16/inf | median | ~69 µs | 150 µs | theirs — routed to F.sdpa |
+
+Scope of the comparison column: these are **eager-mode SDPA calls**, which
+pay GPU-side mask preparation on every invocation. Inside a compiled graph
+that preparation is hoisted and fused away, and the picture inverts — see
+the integration section below. The table above is the right comparison for
+eager callers; it is not the cost of the mem-efficient *kernel*.
 
 The stability column matters as much as the speed column for a robot control
 loop: across every session and mask, our kernel holds a ~2 µs spread while
@@ -36,6 +42,13 @@ in the model, and asserted the prefix/cross masks were all-True "by
 construction" — forgetting that the language block is padded. Both claims
 are withdrawn and replaced by the real-mask measurements above. Lesson
 recorded below.
+
+**Corrections history (2026-07-27):** the table's 1.8× was previously
+presented without qualifying the baseline. Integration profiling showed the
+eager SDPA call spends most of its time on per-call mask preparation, not
+in the attention kernel itself; under torch.compile that overhead vanishes
+and the mem-efficient kernel runs 21.6 µs — faster than ours. The claim now
+carries its scope. Full account in the integration section.
 
 ## Design
 
@@ -81,6 +94,51 @@ The mask enters in one of three modes:
 (v2.0 being *slower* than v1 is the price of scaffolding: correct
 structure first, speed after — same method as softmax v0→v4.)
 
+## Integration into the compiled model (compiled-vk, 2026-07-27)
+
+The `compiled-vk` variant routes the 160 expert attention calls per
+inference to `vlak::fused_attention` inside the compiled + CUDA-graphed
+model (prefix stays on F.sdpa, vision on flash). Getting it to run
+correctly surfaced two real bugs, and getting numbers out of it corrected
+the op-level story.
+
+**Bug 1 — stream capture escape.** The kernels launched with bare
+`<<<...>>>`, which targets the legacy default stream. Eager mode masks this
+(the legacy stream synchronizes with everything); CUDA graph capture runs
+on a side stream, so the launches escaped capture and replays served stale
+output buffers — surfacing as NaN actions three layers downstream. A
+minimal repro (capture one op call, replay with new input values, compare
+against eager) showed replays returning the *previous* answer. Every launch
+now targets `c10::cuda::getCurrentCUDAStream()`.
+
+**Bug 2 — fake-impl strides.** The registered fake returned
+`torch.empty_like(q)`, which inherits the caller's view strides; the kernel
+returns contiguous output. Inductor plans buffer layouts from the fake and
+asserts at runtime on the mismatch. The fake now promises contiguous
+strides. (Cache note: correcting a fake does not invalidate compiled
+artifacts — stale Inductor caches must be cleared by hand.)
+
+**Result.** Accuracy retention 0.999951 — gate PASS. Latency: 63.5 ms p50
+vs the same-day compiled-ro control at 57.8 ms. Per-kernel profiling inside
+the graph:
+
+| expert-site attention | in-graph cost |
+|---|---|
+| `fmha_cutlassF` (mem-efficient, under compiled-ro) | 21.6 µs/call |
+| `fused_attention_wmma_bf16` (ours, under compiled-vk) | 36.4 µs/call |
+
+Our kernel measures consistently in both settings (33.3 µs isolated →
+36.4 µs in-graph; L2 contention accounts for the difference). The baseline
+does not: the 60.4 µs eager SDPA figure was dominated by per-call mask
+preparation kernels that compilation hoists away. Against the mem-efficient
+kernel's true 21.6 µs, ours loses 1.7× at these shapes.
+
+`compiled-ro` therefore remains the shipping variant; `compiled-vk` stays
+in the tree as a working, gate-passing integration whose value is the
+finding itself. Beating tuned cutlass at M=50 would need a further kernel
+generation (v2.5) with uncertain payoff against known cheaper wins
+elsewhere in the budget.
+
 ## Lessons worth keeping
 
 1. **Measure the real bar.** Unmasked F.sdpa (flash) runs 14–18 µs at these
@@ -113,6 +171,17 @@ structure first, speed after — same method as softmax v0→v4.)
 8. **Report tails, not just medians.** The masked mem-efficient path is
    bimodal (40–110 µs across sessions); ours is flat. Median-only reporting
    would have hidden the most deployment-relevant difference.
+9. **Launch on the current stream, always.** Bare `<<<...>>>` submits to the
+   legacy default stream and works in eager mode for years — then silently
+   escapes CUDA graph capture. The failure mode is stale outputs, not an
+   error. `getCurrentCUDAStream()` on every launch site is the cost of
+   composing with the modern stack.
+10. **An eager-mode baseline is not an in-graph baseline.** The same F.sdpa
+    call costs 60 µs eager and 22 µs compiled — the difference is per-call
+    mask preparation that compilation hoists. An op-level win measured
+    against eager calls says nothing about winning inside torch.compile;
+    the only benchmark that settles integration questions is the integrated
+    model, profiled per kernel.
 
 ## Analytic-mask caveat
 

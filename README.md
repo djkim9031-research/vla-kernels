@@ -25,7 +25,7 @@ rather than microbenchmarks alone.
 | Bench toolkit (correctness/latency/bandwidth, ncu parser, trtexec) | ✅ |
 | SmolVLA harness (load / patch / parity / e2e / LoadGen) | ✅ measured on Thor |
 | Variant comparison: eager · kernel-patch · torch.compile · +CUDA Graphs | ✅ → [results/e2e_comparison.md](results/e2e_comparison.md) |
-| Kernel #2 — fused masked attention (WMMA tensor cores) | ✅ at the model's real masks: **1.8× at the cross sites, parity + 2.7× tighter tail at the staircase sites** → [docs/attention.md](docs/attention.md) |
+| Kernel #2 — fused masked attention (WMMA tensor cores) | ✅ at the model's real masks: **1.8× vs the eager SDPA call at the cross sites, parity + 2.7× tighter tail at the staircase sites**; integrated into the compiled model (gate PASS) where the mem-efficient kernel keeps the site — the eager-vs-in-graph gap is the documented finding → [docs/attention.md](docs/attention.md) |
 | WMMA GEMM · Triton ports · INT8/TRT · C++ deployment | ⏳ roadmap |
 
 **Headlines so far (locked clocks):**
