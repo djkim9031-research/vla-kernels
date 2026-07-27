@@ -1,124 +1,124 @@
-    80.078 ms  x  3200  nvjet_sm110_tst_112x64_64x9_2x1_v_bz_TNN
-    56.905 ms  x  1800  void sgemm_largek_lds64<true, false, 5, 5, 4, 4, 4, 34>(float*, float const*, float const*, int, int, int, int, int, int, float const*, float const*, float, float, int, int, int*, int*)
-    38.549 ms  x  1600  void (anonymous namespace)::fused_attention_v3_gqa<32>(__nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16*, long, long, long, long, long, long, long, long, long, int, int, int, int, int, float, int, int, int)
-    38.058 ms  x  1800  nvjet_sm110_tst_168x128_64x5_1x2_h_bz_bias_TNN
-    33.286 ms  x   360  void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<64, 128, 128, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<64, 128, 128, 4, cutlass::bfloat16_t> >, false, false, false, false, true, true, false, false>(pytorch_flash::Flash_fwd_params)
-    27.754 ms  x  1600  nvjet_sm110_tst_80x64_64x12_2x1_v_bz_splitK_TNN
-    18.017 ms  x   300  nvjet_sm110_tst_128x248_64x4_2x1_v_bz_TNT
-    16.778 ms  x    30  void convolve_common_engine_float_NHWC<__nv_bfloat16, __nv_bfloat16, 128, 5, 5, 3, 3, 3, true, false, false, false, false>(int, int, int, __nv_bfloat16 const*, __nv_bfloat16 const*, int, __nv_bfloat16*, conv_kernel_common_params, unsigned long long, unsigned long, float, float, bool, __nv_bfloat16 const*, __nv_bfloat16 const*, bool, bool)
-    16.146 ms  x  1600  nvjet_sm110_tst_48x64_64x15_2x1_v_bz_TNN
-    14.980 ms  x   360  nvjet_sm110_tst_128x256_64x6_2x1_2cta_v_bz_bias_TNT
-    13.806 ms  x   100  void cutlass::Kernel2<cutlass_80_simt_sgemm_128x64_8x5_tn_align1>(cutlass_80_simt_sgemm_128x64_8x5_tn_align1::Params)
-    13.129 ms  x  1600  nvjet_sm110_tst_40x64_64x16_2x1_v_bz_TNN
-    11.686 ms  x  1630  void cublasLt::splitKreduce_kernel<32, 16, int, float, __nv_bfloat16, float, __nv_bfloat16, false, float, __nv_bfloat16, __nv_bfloat16, true, false, false, false>(cublasLt::cublasSplitKParams<float>, float const*, __nv_bfloat16 const*, float*, __nv_bfloat16*, float const*, float const*, __nv_bfloat16 const*, float const*, __nv_bfloat16*, void*, long, float*, int*, float*, float*, float const*, float const*, float const*, float const*, float const*)
-    10.594 ms  x   360  triton_poi_fused_gelu_view_6
-    10.582 ms  x   450  nvjet_sm110_tst_96x128_64x9_1x2_2cta_h_bz_TNN
-     8.374 ms  x  1600  nvjet_sm110_tst_64x16_64x16_1x2_h_bz_TNT
-     8.183 ms  x    30  nvjet_sm110_tst_192x64_64x6_1x1_h_bz_splitK_TNT
-     7.868 ms  x   800  triton_poi_fused__to_copy__unsafe_view_add_arange_cat_copy_cos_cumsum_div_fused_attention_gqa_mul_pow_sin_slice_split_sub_unsqueeze_view_8
-     7.058 ms  x   800  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_cumsum_div_fused_attention_gqa_mul_pow_sin_slice_split_sub_unsqueeze_view_20
-     5.657 ms  x   150  fmha_cutlassF_bf16_aligned_64x64_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 64, 64, true, true>::Params)
-     4.912 ms  x  1600  triton_poi_fused__unsafe_view_mm_mul_silu_18
-     4.066 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_45
-     3.347 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_46
-     3.346 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_43
-     3.345 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_48
+    84.926 ms  x  3200  nvjet_sm110_tst_112x64_64x9_2x1_v_bz_TNN
+    57.187 ms  x  1800  void sgemm_largek_lds64<true, false, 5, 5, 4, 4, 4, 34>(float*, float const*, float const*, int, int, int, int, int, int, float const*, float const*, float, float, int, int, int*, int*)
+    38.401 ms  x  1800  nvjet_sm110_tst_168x128_64x5_1x2_h_bz_bias_TNN
+    34.604 ms  x  1600  void (anonymous namespace)::fused_attention_v3_gqa<32>(__nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16*, long, long, long, long, long, long, long, long, long, int, int, int, int, int, float, int, int, int)
+    31.224 ms  x   360  void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<64, 128, 128, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<64, 128, 128, 4, cutlass::bfloat16_t> >, false, false, false, false, true, true, false, false>(pytorch_flash::Flash_fwd_params)
+    26.954 ms  x  1600  nvjet_sm110_tst_80x64_64x12_2x1_v_bz_splitK_TNN
+    16.956 ms  x  1600  nvjet_sm110_tst_48x64_64x15_2x1_v_bz_TNN
+    16.764 ms  x    30  void convolve_common_engine_float_NHWC<__nv_bfloat16, __nv_bfloat16, 128, 5, 5, 3, 3, 3, true, false, false, false, false>(int, int, int, __nv_bfloat16 const*, __nv_bfloat16 const*, int, __nv_bfloat16*, conv_kernel_common_params, unsigned long long, unsigned long, float, float, bool, __nv_bfloat16 const*, __nv_bfloat16 const*, bool, bool)
+    14.533 ms  x   300  nvjet_sm110_tst_128x248_64x4_2x1_v_bz_TNT
+    13.681 ms  x   360  nvjet_sm110_tst_128x256_64x6_2x1_2cta_v_bz_bias_TNT
+    13.617 ms  x   100  void cutlass::Kernel2<cutlass_80_simt_sgemm_128x64_8x5_tn_align1>(cutlass_80_simt_sgemm_128x64_8x5_tn_align1::Params)
+    13.150 ms  x  1600  nvjet_sm110_tst_40x64_64x16_2x1_v_bz_TNN
+    11.955 ms  x   360  triton_poi_fused_gelu_view_6
+     9.857 ms  x   450  nvjet_sm110_tst_96x128_64x9_1x2_2cta_h_bz_TNN
+     9.692 ms  x  1630  void cublasLt::splitKreduce_kernel<32, 16, int, float, __nv_bfloat16, float, __nv_bfloat16, false, float, __nv_bfloat16, __nv_bfloat16, true, false, false, false>(cublasLt::cublasSplitKParams<float>, float const*, __nv_bfloat16 const*, float*, __nv_bfloat16*, float const*, float const*, __nv_bfloat16 const*, float const*, __nv_bfloat16*, void*, long, float*, int*, float*, float*, float const*, float const*, float const*, float const*, float const*)
+     8.774 ms  x  1600  nvjet_sm110_tst_64x16_64x16_1x2_h_bz_TNT
+     8.250 ms  x    30  nvjet_sm110_tst_192x64_64x6_1x1_h_bz_splitK_TNT
+     7.851 ms  x   800  triton_poi_fused__to_copy__unsafe_view_add_arange_cat_copy_cos_cumsum_div_fused_attention_gqa_mul_pow_sin_slice_split_sub_unsqueeze_view_8
+     7.006 ms  x   800  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_cumsum_div_fused_attention_gqa_mul_pow_sin_slice_split_sub_unsqueeze_view_20
+     5.145 ms  x   150  fmha_cutlassF_bf16_aligned_64x64_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 64, 64, true, true>::Params)
+     4.116 ms  x  1600  triton_poi_fused__unsafe_view_mm_mul_silu_18
+     3.949 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_45
+     3.668 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_48
+     3.346 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_50
+     3.345 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_52
      3.345 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_51
-     3.344 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_52
-     3.344 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_50
-     3.344 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_49
-     3.343 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_47
-     3.320 ms  x   800  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_cumsum_div_mul_pow_sin_slice_split_sub_unsqueeze_view_7
-     3.314 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_3
-     2.662 ms  x   150  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_add_arange_bitwise_and_clone_constant_pad_nd_copy_cos_div_expand_le_mul_pow_scalar_tensor_sin_slice_split_sub_transpose_unsqueeze_view_where_14
-     2.536 ms  x  1600  triton_poi_fused_mm_view_17
-     2.364 ms  x  1600  triton_poi_fused__to_copy__unsafe_view_fused_attention_gqa_view_27
-     2.109 ms  x  1800  void scal_kernel<float, float, 1, true, 6, 5, 5, 3>(cublasTransposeParams<float>, float const*, float*, float const*)
-     1.950 ms  x   320  nvjet_sm110_tst_64x64_64x13_1x2_h_bz_TNT
-     1.655 ms  x   800  triton_poi_fused__to_copy__unsafe_view_cat_fused_attention_gqa_view_13
-     1.627 ms  x   800  triton_poi_fused__to_copy__unsafe_view_cat_fused_attention_gqa_view_15
-     1.468 ms  x  1900  Memset (Unknown)
-     1.402 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_34
+     3.345 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_47
+     3.344 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_43
+     3.344 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_46
+     3.343 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_49
+     3.323 ms  x   800  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_cumsum_div_mul_pow_sin_slice_split_sub_unsqueeze_view_7
+     3.315 ms  x    10  triton_poi_fused__to_copy_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_3
+     2.655 ms  x   150  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_add_arange_bitwise_and_clone_constant_pad_nd_copy_cos_div_expand_le_mul_pow_scalar_tensor_sin_slice_split_sub_transpose_unsqueeze_view_where_14
+     2.521 ms  x  1600  triton_poi_fused_mm_view_17
+     2.334 ms  x  1600  triton_poi_fused__to_copy__unsafe_view_fused_attention_gqa_view_27
+     2.136 ms  x  1800  void scal_kernel<float, float, 1, true, 6, 5, 5, 3>(cublasTransposeParams<float>, float const*, float*, float const*)
+     2.027 ms  x   320  nvjet_sm110_tst_64x64_64x13_1x2_h_bz_TNT
+     1.940 ms  x  1900  Memset (Unknown)
+     1.671 ms  x   150  triton_poi_fused__unsafe_view_mm_mul_silu_view_24
+     1.641 ms  x   800  triton_poi_fused__to_copy__unsafe_view_cat_fused_attention_gqa_view_13
+     1.623 ms  x   800  triton_poi_fused__to_copy__unsafe_view_cat_fused_attention_gqa_view_15
+     1.398 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_34
      1.391 ms  x    30  triton_red_fused_add_native_layer_norm_view_8
-     1.370 ms  x   800  triton_poi_fused__to_copy__unsafe_view_view_26
-     1.353 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_37
-     1.312 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_30
-     1.306 ms  x   150  triton_poi_fused__unsafe_view_mul_silu_23
-     1.285 ms  x    30  triton_poi_fused_add_embedding_0
-     1.237 ms  x   150  triton_per_fused_add_native_layer_norm_view_12
-     1.228 ms  x   120  triton_per_fused_add_native_layer_norm_view_13
-     1.160 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_33
-     1.077 ms  x   150  triton_per_fused_add_native_layer_norm_view_11
-     1.035 ms  x    30  triton_red_fused_add_native_layer_norm_view_9
-     1.033 ms  x   150  triton_poi_fused__unsafe_view_mm_mul_silu_view_24
-     0.968 ms  x   150  triton_per_fused_add_native_layer_norm_view_10
-     0.939 ms  x   800  triton_per_fused_add_cumsum_min_sub_unsqueeze_1
-     0.931 ms  x    80  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_div_mul_pow_sin_slice_split_sub_unsqueeze_view_28
-     0.854 ms  x    30  triton_red_fused_add_native_layer_norm_view_7
-     0.778 ms  x    30  triton_poi_fused_convolution_4
-     0.556 ms  x    80  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_div_mul_pow_sin_slice_split_sub_unsqueeze_view_12
-     0.547 ms  x   300  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_bitwise_and_clone_constant_pad_nd_expand_le_mul_scalar_tensor_slice_transpose_unsqueeze_view_where_21
-     0.517 ms  x   100  void cutlass::Kernel2<cutlass_80_simt_sgemm_64x64_8x5_tn_align1>(cutlass_80_simt_sgemm_64x64_8x5_tn_align1::Params)
-     0.427 ms  x    60  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_38
-     0.406 ms  x    60  triton_poi_fused__to_copy_0
-     0.384 ms  x    30  triton_poi_fused__to_copy__unsafe_index_add_arange_clamp_mul_sub_view_0
-     0.366 ms  x    30  triton_red_fused_add_native_layer_norm_view_3
-     0.334 ms  x    60  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_39
+     1.340 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_37
+     1.329 ms  x   800  triton_poi_fused__to_copy__unsafe_view_view_26
+     1.318 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_30
+     1.311 ms  x    30  triton_poi_fused_add_embedding_0
+     1.300 ms  x   150  triton_poi_fused__unsafe_view_mul_silu_23
+     1.261 ms  x   120  triton_per_fused_add_native_layer_norm_view_13
+     1.217 ms  x   150  triton_per_fused_add_native_layer_norm_view_12
+     1.162 ms  x   700  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_33
+     1.071 ms  x   150  triton_per_fused_add_native_layer_norm_view_11
+     1.034 ms  x    30  triton_red_fused_add_native_layer_norm_view_9
+     0.966 ms  x   150  triton_per_fused_add_native_layer_norm_view_10
+     0.950 ms  x   800  triton_per_fused_add_cumsum_min_sub_unsqueeze_1
+     0.919 ms  x    80  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_div_mul_pow_sin_slice_split_sub_unsqueeze_view_28
+     0.858 ms  x    30  triton_red_fused_add_native_layer_norm_view_7
+     0.769 ms  x    30  triton_poi_fused_convolution_4
+     0.744 ms  x    70  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_35
+     0.551 ms  x    80  triton_poi_fused__to_copy__unsafe_view_add_arange_copy_cos_div_mul_pow_sin_slice_split_sub_unsqueeze_view_12
+     0.543 ms  x   300  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_bitwise_and_clone_constant_pad_nd_expand_le_mul_scalar_tensor_slice_transpose_unsqueeze_view_where_21
+     0.521 ms  x   100  void cutlass::Kernel2<cutlass_80_simt_sgemm_64x64_8x5_tn_align1>(cutlass_80_simt_sgemm_64x64_8x5_tn_align1::Params)
+     0.395 ms  x    60  triton_poi_fused__to_copy_0
+     0.385 ms  x    30  triton_poi_fused__to_copy__unsafe_index_add_arange_clamp_mul_sub_view_0
+     0.365 ms  x    30  triton_red_fused_add_native_layer_norm_view_3
+     0.348 ms  x    60  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_38
+     0.316 ms  x    60  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_39
+     0.304 ms  x    30  triton_poi_fused__unsafe_view_clone_permute_view_0
      0.296 ms  x    30  void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})
-     0.293 ms  x    30  triton_poi_fused__unsafe_view_clone_permute_view_0
-     0.287 ms  x    30  void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})
-     0.274 ms  x    30  triton_per_fused_add_native_layer_norm_view_14
-     0.274 ms  x    70  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_35
-     0.269 ms  x    30  triton_red_fused_native_layer_norm_0
-     0.260 ms  x    60  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_36
-     0.237 ms  x    10  void at::native::(anonymous namespace)::multi_tensor_apply_kernel<at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<float, 2, 1, 1>, at::native::Copy<float, float> >(at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<float, 2, 1, 1>, at::native::Copy<float, float>)
-     0.211 ms  x    30  triton_poi_fused_add_native_layer_norm_view_5
-     0.209 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_addmm_mean_mul_pow_rsqrt_view_19
-     0.207 ms  x   100  triton_poi_fused__to_copy_addmm_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_4
-     0.200 ms  x    60  void at::native::(anonymous namespace)::write_indices<long>(long*, at::native::(anonymous namespace)::TensorDims<long>, int, long, long*, long)
-     0.196 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_addmm_mean_mul_pow_rsqrt_view_29
-     0.189 ms  x   100  triton_per_fused__to_copy_add_addmm_mean_mul_pow_rsqrt_view_6
-     0.189 ms  x   100  triton_poi_fused_addmm_silu_view_5
-     0.182 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_slice_41
-     0.177 ms  x    30  triton_poi_fused_convolution_3
-     0.174 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_addmm_mean_mul_pow_rsqrt_view_16
-     0.172 ms  x    30  triton_poi_fused_convolution_5
-     0.155 ms  x    60  void at_cuda_detail::cub::detail::select::DeviceSelectSweepKernel<at_cuda_detail::cub::detail::select::policy_hub<long, bool, int, false, (at_cuda_detail::cub::SelectImpl)0>::Policy1000, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::counting_iterator<long, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, long*, int*, at_cuda_detail::cub::ScanTileState<int, true>, at_cuda_detail::cub::NullType, at_cuda_detail::cub::NullType, int, at_cuda_detail::cub::detail::select::streaming_context_t<long, true>, (at_cuda_detail::cub::SelectImpl)0>(thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::counting_iterator<long, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, long*, int*, at_cuda_detail::cub::ScanTileState<int, true>, at_cuda_detail::cub::NullType, at_cuda_detail::cub::NullType, int, int, at_cuda_detail::cub::detail::select::streaming_context_t<long, true>, at_cuda_detail::cub::detail::vsmem_t)
-     0.152 ms  x    30  triton_poi_fused_native_layer_norm_2
-     0.149 ms  x    30  triton_per_fused_native_layer_norm_1
-     0.147 ms  x    40  void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)
-     0.138 ms  x    60  void at_cuda_detail::cub::detail::reduce::DeviceReduceSingleTileKernel<at_cuda_detail::cub::detail::reduce::policy_hub<int, unsigned long long, cuda::std::__4::plus<void> >::Policy1000, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, int*, unsigned long long, cuda::std::__4::plus<void>, int, int, cuda::std::__4::__identity>(thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, int*, unsigned long long, cuda::std::__4::plus<void>, int, cuda::std::__4::__identity)
-     0.129 ms  x    90  triton_poi_fused_add_addmm_mul_view_44
-     0.123 ms  x   100  triton_per_fused_sum_0
+     0.281 ms  x    30  void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<8> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})
+     0.279 ms  x    30  triton_red_fused_native_layer_norm_0
+     0.277 ms  x    30  triton_per_fused_add_native_layer_norm_view_14
+     0.262 ms  x    60  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_36
+     0.242 ms  x    10  void at::native::(anonymous namespace)::multi_tensor_apply_kernel<at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<float, 2, 1, 1>, at::native::Copy<float, float> >(at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<float, 2, 1, 1>, at::native::Copy<float, float>)
+     0.225 ms  x   100  triton_poi_fused__to_copy_addmm_cat_cos_expand_linspace_mul_pow_reciprocal_sin_unsqueeze_view_4
+     0.210 ms  x    30  triton_poi_fused_add_native_layer_norm_view_5
+     0.207 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_addmm_mean_mul_pow_rsqrt_view_19
+     0.200 ms  x   100  triton_poi_fused_addmm_silu_view_5
+     0.194 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_addmm_mean_mul_pow_rsqrt_view_29
+     0.194 ms  x    60  void at::native::(anonymous namespace)::write_indices<long>(long*, at::native::(anonymous namespace)::TensorDims<long>, int, long, long*, long)
+     0.192 ms  x   100  triton_per_fused__to_copy_add_addmm_mean_mul_pow_rsqrt_view_6
+     0.188 ms  x    30  triton_poi_fused_convolution_5
+     0.186 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_slice_41
+     0.176 ms  x   100  triton_per_fused__to_copy__unsafe_view_add_addmm_mean_mul_pow_rsqrt_view_16
+     0.176 ms  x    30  triton_poi_fused_convolution_3
+     0.170 ms  x    60  void at_cuda_detail::cub::detail::select::DeviceSelectSweepKernel<at_cuda_detail::cub::detail::select::policy_hub<long, bool, int, false, (at_cuda_detail::cub::SelectImpl)0>::Policy1000, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::counting_iterator<long, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, long*, int*, at_cuda_detail::cub::ScanTileState<int, true>, at_cuda_detail::cub::NullType, at_cuda_detail::cub::NullType, int, at_cuda_detail::cub::detail::select::streaming_context_t<long, true>, (at_cuda_detail::cub::SelectImpl)0>(thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::counting_iterator<long, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, long*, int*, at_cuda_detail::cub::ScanTileState<int, true>, at_cuda_detail::cub::NullType, at_cuda_detail::cub::NullType, int, int, at_cuda_detail::cub::detail::select::streaming_context_t<long, true>, at_cuda_detail::cub::detail::vsmem_t)
+     0.154 ms  x    30  triton_poi_fused_native_layer_norm_2
+     0.150 ms  x    30  triton_per_fused_native_layer_norm_1
+     0.143 ms  x    40  void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)
+     0.136 ms  x    60  void at_cuda_detail::cub::detail::reduce::DeviceReduceSingleTileKernel<at_cuda_detail::cub::detail::reduce::policy_hub<int, unsigned long long, cuda::std::__4::plus<void> >::Policy1000, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, int*, unsigned long long, cuda::std::__4::plus<void>, int, int, cuda::std::__4::__identity>(thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::transform_iterator<at::native::(anonymous namespace)::NonZeroOp<bool>, bool const*, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default, thrust::THRUST_300001_SM_800_900_1000_1100_1200_NS::use_default>, int*, unsigned long long, cuda::std::__4::plus<void>, int, cuda::std::__4::__identity)
+     0.130 ms  x    90  triton_poi_fused_add_addmm_mul_view_44
+     0.122 ms  x   100  triton_per_fused_sum_0
      0.115 ms  x    60  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_bitwise_and_clone_constant_pad_nd_expand_le_mul_scalar_tensor_slice_transpose_unsqueeze_view_where_9
-     0.097 ms  x    40  Memcpy DtoD (Device -> Device)
-     0.091 ms  x    30  void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})
-     0.090 ms  x    60  Memcpy DtoH (Device -> Pinned)
-     0.077 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_31
-     0.061 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_22
-     0.058 ms  x    60  void at_cuda_detail::cub::detail::scan::DeviceCompactInitKernel<at_cuda_detail::cub::ScanTileState<int, true>, int*>(at_cuda_detail::cub::ScanTileState<int, true>, int, int*)
-     0.057 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_32
+     0.109 ms  x    40  Memcpy DtoD (Device -> Device)
+     0.101 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_31
+     0.095 ms  x    60  Memcpy DtoH (Device -> Pinned)
+     0.089 ms  x    30  void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})
+     0.065 ms  x    60  void at_cuda_detail::cub::detail::scan::DeviceCompactInitKernel<at_cuda_detail::cub::ScanTileState<int, true>, int*>(at_cuda_detail::cub::ScanTileState<int, true>, int, int*)
+     0.060 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_32
      0.054 ms  x    30  triton_per_fused__to_copy_arange_bucketize_clamp_mul_reciprocal_select_sum_unsqueeze_1
-     0.051 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_25
-     0.042 ms  x    10  std::enable_if<true, void>::type internal::gemvx::kernel<int, int, float, float, float, float, true, true, true, false, 8, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float>)
-     0.041 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_40
-     0.039 ms  x    30  triton_per_fused_add_native_layer_norm_view_4
-     0.035 ms  x    30  triton_poi_fused_full_6
+     0.050 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_22
+     0.046 ms  x    30  triton_poi_fused_full_6
+     0.045 ms  x    30  triton_per_fused_add_native_layer_norm_view_4
+     0.044 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_25
+     0.043 ms  x    10  std::enable_if<true, void>::type internal::gemvx::kernel<int, int, float, float, float, float, true, true, true, false, 8, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float const>, cublasGemvTensorStridedBatched<float>, float>)
+     0.038 ms  x    10  triton_per_fused__to_copy__unsafe_view_add_mean_mm_mul_pow_rsqrt_40
+     0.038 ms  x    10  triton_poi_fused_embedding_0
+     0.035 ms  x    10  triton_per_fused__to_copy_add_mean_mul_pow_rsqrt_11
      0.034 ms  x    30  triton_poi_fused_arange_0
-     0.034 ms  x    10  triton_per_fused__to_copy_add_mean_mul_pow_rsqrt_11
      0.032 ms  x    30  triton_poi_fused_add_mul_unsqueeze_2
-     0.031 ms  x    10  triton_poi_fused_embedding_0
-     0.029 ms  x    10  void at::native::(anonymous namespace)::CatArrayBatchedCopy<at::native::(anonymous namespace)::OpaqueType<1u>, unsigned int, 2, 64, 64>(at::native::(anonymous namespace)::OpaqueType<1u>*, at::native::(anonymous namespace)::CatArrInputTensorMetadata<at::native::(anonymous namespace)::OpaqueType<1u>, unsigned int, 64, 64>, at::native::(anonymous namespace)::TensorSizeStride<unsigned int, 4u>, int, unsigned int)
-     0.027 ms  x    30  triton_poi_fused_ones_1
-     0.025 ms  x    20  triton_per_fused_cumsum_2
+     0.029 ms  x    30  triton_poi_fused_ones_1
+     0.028 ms  x    10  void at::native::(anonymous namespace)::CatArrayBatchedCopy<at::native::(anonymous namespace)::OpaqueType<1u>, unsigned int, 2, 64, 64>(at::native::(anonymous namespace)::OpaqueType<1u>*, at::native::(anonymous namespace)::CatArrInputTensorMetadata<at::native::(anonymous namespace)::OpaqueType<1u>, unsigned int, 64, 64>, at::native::(anonymous namespace)::TensorSizeStride<unsigned int, 4u>, int, unsigned int)
+     0.026 ms  x    20  triton_per_fused_cumsum_2
+     0.025 ms  x    40  Memcpy HtoD (Pageable -> Device)
      0.024 ms  x    10  void at::native::(anonymous namespace)::distribution_elementwise_grid_stride_kernel<float, 4, at::native::templates::cuda::normal_and_transform<float, float, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(curandStatePhilox4_32_10*)#2}, at::native::(anonymous namespace)::distribution_nullary_kernel<float, float, float4, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_and_transform<float, float, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(curandStatePhilox4_32_10*)#2}, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_and_transform<float, float, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(curandStatePhilox4_32_10*)#2} const&, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(int, float)#1}>(long, at::PhiloxCudaState, at::native::templates::cuda::normal_and_transform<float, float, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(curandStatePhilox4_32_10*)#2}, at::native::(anonymous namespace)::distribution_nullary_kernel<float, float, float4, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_and_transform<float, float, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(curandStatePhilox4_32_10*)#2}, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_and_transform<float, float, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::CUDAGeneratorImpl*, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(curandStatePhilox4_32_10*)#2} const&, at::native::templates::cuda::normal_kernel<at::CUDAGeneratorImpl*>(at::TensorBase const&, double, double, at::CUDAGeneratorImpl*)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1})::{lambda(int, float)#1})
-     0.024 ms  x    10  void at::native::(anonymous namespace)::multi_tensor_apply_kernel<at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<long, 2, 1, 1>, at::native::Copy<long, long> >(at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<long, 2, 1, 1>, at::native::Copy<long, long>)
-     0.022 ms  x    10  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_bitwise_and_clone_constant_pad_nd_expand_le_mul_scalar_tensor_slice_transpose_unsqueeze_view_where_10
-     0.021 ms  x    20  void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>, std::array<char*, 1ul> >(int, at::native::FillFunctor<long>, std::array<char*, 1ul>)
-     0.016 ms  x    10  void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 2ul> >(int, at::native::AUnaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 2ul>)
-     0.015 ms  x    40  Memcpy HtoD (Pageable -> Device)
+     0.023 ms  x    10  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_bitwise_and_clone_constant_pad_nd_expand_le_mul_scalar_tensor_slice_transpose_unsqueeze_view_where_10
+     0.022 ms  x    10  triton_poi_fused_add_addmm_mul_view_42
+     0.021 ms  x    10  void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 2ul> >(int, at::native::AUnaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 2ul>)
+     0.020 ms  x    20  void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>, std::array<char*, 1ul> >(int, at::native::FillFunctor<long>, std::array<char*, 1ul>)
+     0.016 ms  x    10  void at::native::(anonymous namespace)::multi_tensor_apply_kernel<at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<long, 2, 1, 1>, at::native::Copy<long, long> >(at::native::(anonymous namespace)::TensorListMetadata<2>, at::native::(anonymous namespace)::UnaryOpFunctor<long, 2, 1, 1>, at::native::Copy<long, long>)
      0.014 ms  x    10  triton_poi_fused_copy_slice_zeros_2
-     0.014 ms  x    10  triton_poi_fused_add_addmm_mul_view_42
-     0.013 ms  x    10  triton_poi_fused_normal_0
-     0.011 ms  x    10  void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<bool>, std::array<char*, 1ul> >(int, at::native::FillFunctor<bool>, std::array<char*, 1ul>)
-# total device time (10 calls): 527.0 ms
+     0.012 ms  x    10  triton_poi_fused_normal_0
+     0.010 ms  x    10  void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<bool>, std::array<char*, 1ul> >(int, at::native::FillFunctor<bool>, std::array<char*, 1ul>)
+# total device time (10 calls): 521.1 ms

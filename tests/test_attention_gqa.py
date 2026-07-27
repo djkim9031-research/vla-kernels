@@ -49,6 +49,8 @@ CASES = [
     (1, 32, 64, 4, 2, 64, 0, 0),          # exact tile boundaries
     (1, 33, 65, 4, 2, 40, 8, 16),         # one past tile boundaries
     (3, 50, 241, 15, 5, 241, 196, 240),   # batched
+    (1, 40, 128, 6, 2, 128, 32, 64),      # dead band exactly covers 2 frags
+    (1, 50, 241, 15, 5, 241, 200, 232),   # band strictly inside frags
 ]
 
 

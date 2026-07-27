@@ -77,6 +77,18 @@ baseline gap is written up in [docs/attention.md](../docs/attention.md).
 Day-to-day note: the 57.8 ms control vs the 54.3 ms below is thermal/clock
 drift across sessions — variants are only compared within a session.
 
+**v3 GQA-native kernel (compiled-vk3, 2026-07-27):** rebuilt op — GQA-native
+(no expand), layout-native (no transposes), analytic probed mask (no mask
+tensor), register (m,l) + register-resident softmax columns. Locked-clock
+in-graph region at the expert sites: ours 21.6 us/call with zero entourage
+vs sdpa's 19.9 + 2.0 prep = 21.9 — **region parity**; e2e p50 differences
+(both ~54-56 ms, gate PASS 0.99994) are inside run-to-run noise. Full
+design, scoreboard, and the measured dead ends (fragment skipping, warp
+specialization, enable_gqa) in [docs/attention.md](../docs/attention.md).
+Session hygiene reminder these runs re-taught: verify locked clocks
+(devfreq cur_freq == max) AND a quiet GPU before benching — an unlocked
+day masqueraded as variant regressions twice.
+
 **Eager→SDPA routing (2026-07-24, Phase D step 3a):** lerobot's expert/prefix
 attention is hand-written (fp32-upcast QK^T → where(mask) → softmax → PV, 176
 sites). Op-level measurement showed F.sdpa 3–6× faster at those shapes; the

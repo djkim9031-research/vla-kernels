@@ -139,6 +139,55 @@ finding itself. Beating tuned cutlass at M=50 would need a further kernel
 generation (v2.5) with uncertain payoff against known cheaper wins
 elsewhere in the budget.
 
+## v3: attack the region, not the kernel (2026-07-27)
+
+v3 (`vlak::fused_attention_gqa`, `compiled-vk3` variant) rebuilds the op
+around what the library kernel cannot know about this model:
+
+- **GQA-native**: query head h reads kv head h/G from the unexpanded
+  5-head cache; the expand copies vanish and in-kernel K/V reads drop 3x
+  (sibling heads share lines through L2).
+- **Layout-native**: q/k/v consumed at their natural (B, seq, heads, 64)
+  strides; output written (B, M, H, 64) contiguous so the trailing
+  reshape is a view. Every transpose/contiguous staging kernel vanishes.
+- **Analytic two-boundary mask**: visible(r, c) = c < P ? (c < ds ||
+  c >= de) : staircase — solved per site by a one-time eager probe that
+  requires EXACT equality with the captured mask, falling back to sdpa
+  otherwise. No mask tensor, no mask traffic.
+- **Register (m, l) + shuffle reductions**: a row's TPR stat-sharing
+  lanes live in one warp, so the smem stats and two of six per-tile
+  block barriers go away (adversarial 5-lens review, compute-sanitizer
+  x3, and a 300-trial randomized stress all clean).
+- **Register-resident columns (v3.2)**: the softmax phase holds its
+  scores in registers between the max and exp passes instead of a smem
+  writeback/re-read (the softmax-v4 lesson) — worth ~3 us/call.
+
+Locked-clock scoreboard at the expert sites, in-graph and same-session:
+
+| | compiled-ro | compiled-vk3 |
+|---|---|---|
+| attention kernel | fmha_cutlassF 19.9 us/call | ours 21.6 us/call |
+| expand/cast/mask-prep entourage | 2.0 us/call | none |
+| **region** | **21.9 us/call** | **21.6 us/call** |
+
+**Verdict: region parity.** The mem-efficient kernel keeps a 1.7 us
+kernel-vs-kernel edge; the zero-entourage design cancels it. End-to-end
+p50 differences between the two variants (both ~54-56 ms, retention
+0.99994 gate PASS) sit inside run-to-run noise. Isolated timings match
+in-graph timings for our op throughout (21.2 vs 21.6 us) — the eager-call
+inflation documented above never applies to it.
+
+Measured dead ends, kept for the record: **fragment skipping** (masking
+two fully-dead 16-col WMMA fragments per cross tile) LOST ~2.4 us — in a
+barrier-synchronized block, skipping work for some warps saves nothing
+unless the slowest participant gets faster, and the branch overhead is
+paid everywhere. **Warp-specialized softmax hiding** was ruled out by
+phase attribution before implementation: loads/barriers ~8.7 us, mma
+~7.7 us, softmax ~8.0 us (now ~4.8) — both phases are issue-bound on the
+same warps, so a 4/4 split doubles each phase and the overlap cannot pay.
+**enable_gqa=True** drops to the fp32 math backend when a mask is present
+(~280 us/call): the GQA read savings are unreachable via stock sdpa.
+
 ## Lessons worth keeping
 
 1. **Measure the real bar.** Unmasked F.sdpa (flash) runs 14–18 µs at these

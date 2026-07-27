@@ -418,22 +418,29 @@ __global__ void fused_attention_v3_gqa(
       int r = tid / TPR, quart = tid % TPR, c0 = quart * (BN / TPR);
       int grow = m0 + r;
       bool row_ok = grow < M;
+      constexpr int CPT = BN / TPR;      // this thread's columns of the row
 
+      // register-resident columns (the softmax-v4 lesson): S is read ONCE;
+      // the scaled scores wait in registers for the exp pass instead of a
+      // writeback/re-read round trip through shared memory
+      float vv[CPT];
       float tmax = -FLT_MAX;
       if (tstate == 2) {
-        for (int c = c0; c < c0 + BN / TPR; ++c) {
-          float val = row_ok ? S[r * LD + c] * scale : -FLT_MAX;
-          S[r * LD + c] = val;
+#pragma unroll
+        for (int i = 0; i < CPT; ++i) {
+          float val = row_ok ? S[r * LD + c0 + i] * scale : -FLT_MAX;
+          vv[i] = val;
           tmax = fmaxf(tmax, val);
         }
       } else {
-        for (int c = c0; c < c0 + BN / TPR; ++c) {
-          int gc = n0 + c;
+#pragma unroll
+        for (int i = 0; i < CPT; ++i) {
+          int gc = n0 + c0 + i;
           bool valid = row_ok && gc < N &&
                        (gc < P ? (gc < ds || gc >= de)
                                : (gc <= startNM + grow));
-          float val = valid ? S[r * LD + c] * scale : -FLT_MAX;
-          S[r * LD + c] = val;
+          float val = valid ? S[r * LD + c0 + i] * scale : -FLT_MAX;
+          vv[i] = val;
           tmax = fmaxf(tmax, val);
         }
       }
@@ -446,15 +453,22 @@ __global__ void fused_attention_v3_gqa(
       float alpha = 1.f, lsum = 0.f;
       if (row_ok && m_new > -FLT_MAX) {
         alpha = expf(m_run - m_new);
-        for (int c = c0; c < c0 + BN / TPR; ++c) {
-          float p = expf(S[r * LD + c] - m_new);
-          Pb[r * LD + c] = __float2bfloat16(p);
-          lsum += p;
+#pragma unroll
+        for (int i = 0; i < CPT; i += 2) {           // paired bf16 stores
+          float p0 = expf(vv[i] - m_new);
+          float p1 = expf(vv[i + 1] - m_new);
+          *(__nv_bfloat162*)(Pb + r * LD + c0 + i) =
+              __floats2bfloat162_rn(p0, p1);
+          lsum += p0 + p1;
         }
+#pragma unroll
         for (int d = quart * (HEAD_DIM / TPR); d < (quart + 1) * (HEAD_DIM / TPR); ++d)
           Oa[r * LD + d] *= alpha;
       } else {
-        for (int c = c0; c < c0 + BN / TPR; ++c) Pb[r * LD + c] = __float2bfloat16(0.f);
+        __nv_bfloat162 z2 = __floats2bfloat162_rn(0.f, 0.f);
+#pragma unroll
+        for (int i = 0; i < CPT; i += 2)
+          *(__nv_bfloat162*)(Pb + r * LD + c0 + i) = z2;
       }
       // row sum across the same lanes; shuffles run unconditionally so the
       // butterfly never diverges (masked lanes contribute 0)

@@ -62,6 +62,10 @@ def main():
                     help="minimum query count; 330 keeps Offline above the "
                          "60 s validity window at ~4.6 samples/s")
     ap.add_argument("--min-duration-ms", type=int, default=60_000)
+    ap.add_argument("--expected-qps", type=float, default=25.0,
+                    help="Offline only: sizes the pre-generated query batch "
+                         "(must exceed the achievable rate or the run ends "
+                         "before min duration and is INVALID)")
     ap.add_argument("--outdir", default="")
     args = ap.parse_args()
 
@@ -78,6 +82,7 @@ def main():
     settings.mode = lg.TestMode.PerformanceOnly
     settings.min_query_count = args.min_queries
     settings.min_duration_ms = args.min_duration_ms
+    settings.offline_expected_qps = args.expected_qps
 
     log_settings = lg.LogSettings()
     log_settings.log_output.outdir = outdir
