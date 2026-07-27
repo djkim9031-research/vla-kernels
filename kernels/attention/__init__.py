@@ -29,6 +29,9 @@ def _ext():
     torch.library.register_fake("vlak::fused_attention")(
         lambda q, k, v, scale=-1.0, attn_mask=None, prefix_len=-1:
             torch.empty(q.shape, dtype=q.dtype, device=q.device))
+    torch.library.register_fake("vlak::fused_attention_gqa")(
+        lambda q, k, v, scale=-1.0, prefix_len=-1, dead_start=0, dead_end=0:
+            torch.empty(q.shape, dtype=q.dtype, device=q.device))
     return ext
 
 
@@ -60,3 +63,22 @@ def fused_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
     return torch.ops.vlak.fused_attention(
         q, k, v, -1.0 if scale is None else scale, attn_mask,
         -1 if prefix_len is None else prefix_len)
+
+
+def fused_attention_gqa(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                        scale: float | None = None,
+                        prefix_len: int | None = None,
+                        dead_start: int = 0,
+                        dead_end: int = 0) -> torch.Tensor:
+    """GQA-native SDPA over the model's projection layouts.
+
+    q is (B, M, H, 64); k/v are (B, N, H_kv, 64) with H a multiple of H_kv —
+    consumed at their natural strides (no transpose/contiguous/expand). The
+    mask is arithmetic: visible(r, c) = c < prefix_len ? (c < dead_start or
+    c >= dead_end) : c <= (N - M) + r. Returns (B, M, H, 64) contiguous, so
+    .reshape(B, M, H*64) is a view. bf16 only.
+    """
+    _ensure_registered()
+    return torch.ops.vlak.fused_attention_gqa(
+        q, k, v, -1.0 if scale is None else scale,
+        -1 if prefix_len is None else prefix_len, dead_start, dead_end)

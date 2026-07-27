@@ -301,9 +301,209 @@ __global__ void fused_attention_wmma_bf16(
   }
 }
 
+// ---- v3: GQA-native, layout-native, analytic two-boundary mask -------------
+// Differences from v2, each removing work the surrounding graph would pay:
+//   * GQA-native: q has H heads, k/v have H/G (grouped) heads; the block for
+//     query head h reads kv head h/G directly. No expand anywhere — the 3
+//     blocks of a group hit the same K/V lines through L2 instead of reading
+//     3 materialized copies.
+//   * layout-native: q/k/v are consumed at arbitrary strides with D innermost
+//     (the model's (B, S, heads, D) projection layout) — no transpose or
+//     contiguous() staging. Output is written (B, M, H, D) contiguous, so the
+//     downstream reshape to (B, M, H*D) is a free view.
+//   * analytic two-boundary mask: visible(r, c) =
+//         c < P  ?  c < ds || c >= de          (prefix minus the pad band)
+//                :  c <= (N - M) + r           (suffix staircase)
+//     covering the model's REAL masks (pad dead band [ds, de)) as arithmetic:
+//     no mask tensor, no mask traffic. ds == de means no dead band.
+template <int BMT>
+__global__ void fused_attention_v3_gqa(
+    const __nv_bfloat16* __restrict__ q, const __nv_bfloat16* __restrict__ k,
+    const __nv_bfloat16* __restrict__ v, __nv_bfloat16* __restrict__ o,
+    long qB, long qM, long qH, long kB, long kN, long kH,
+    long vB, long vN, long vH,
+    int H, int G, int tiles_m, int M, int N, float scale,
+    int P, int ds, int de) {
+  extern __shared__ unsigned char smem_raw[];
+  constexpr int TPR = V2_THREADS / BMT;
+  __nv_bfloat16* Qs = (__nv_bfloat16*)smem_raw;
+  __nv_bfloat16* Kt[2] = {Qs + BMT * LD, Qs + BMT * LD + BN * LD};
+  __nv_bfloat16* Vt[2] = {Kt[1] + BN * LD, Kt[1] + 2 * BN * LD};
+  __nv_bfloat16* Pb = Vt[1] + BN * LD;
+  float* S  = (float*)(Pb + BMT * LD);
+  float* Oa = S + BMT * LD;
+
+  int bh = blockIdx.x / tiles_m;
+  int m0 = (blockIdx.x % tiles_m) * BMT;
+  int b = bh / H, h = bh % H, kvh = h / G;
+  int tid = threadIdx.x, warp = tid / 32;
+
+  const __nv_bfloat16* qp = q + (size_t)b * qB + (size_t)h * qH;
+  const __nv_bfloat16* kp = k + (size_t)b * kB + (size_t)kvh * kH;
+  const __nv_bfloat16* vp = v + (size_t)b * vB + (size_t)kvh * vH;
+
+  for (int i = tid; i < BMT * HEAD_DIM; i += V2_THREADS) {
+    int r = i / HEAD_DIM, c = i % HEAD_DIM;
+    Qs[r * LD + c] = (m0 + r < M) ? qp[(size_t)(m0 + r) * qM + c]
+                                  : __float2bfloat16(0.f);
+  }
+  for (int i = tid; i < BMT * HEAD_DIM; i += V2_THREADS) Oa[(i / HEAD_DIM) * LD + i % HEAD_DIM] = 0.f;
+
+  // per-row (m, l) state lives in registers, replicated across the row's TPR
+  // lanes (all lanes apply identical updates from shuffle-reduced values) —
+  // no smem stats, and the two stats barriers of the v2 scheme disappear:
+  // a row's TPR lanes are contiguous lanes of ONE warp, so the max/sum
+  // reductions are xor-butterflies, not smem round-trips
+  float m_run = -FLT_MAX, l_run = 0.f;
+
+  auto prefetch = [&](int n0, int buf) {
+    for (int ch = tid; ch < BN * 8; ch += V2_THREADS) {
+      int r = ch / 8, seg = ch % 8;
+      if (n0 + r < N) {
+        cpa16(Kt[buf] + r * LD + seg * 8, kp + (size_t)(n0 + r) * kN + seg * 8);
+        cpa16(Vt[buf] + r * LD + seg * 8, vp + (size_t)(n0 + r) * vN + seg * 8);
+      } else {
+        float4 z = {0.f, 0.f, 0.f, 0.f};
+        *(float4*)(Kt[buf] + r * LD + seg * 8) = z;
+        *(float4*)(Vt[buf] + r * LD + seg * 8) = z;
+      }
+    }
+    __pipeline_commit();
+  };
+
+  prefetch(0, 0);
+  int n_tiles = (N + BN - 1) / BN;
+  int startNM = N - M;
+  int rows_lo = m0, rows_hi = min(m0 + BMT, M) - 1;
+  bool nodead = de <= ds;
+
+  for (int t = 0; t < n_tiles; ++t) {
+    int n0 = t * BN, cur = t & 1;
+    if (t + 1 < n_tiles) {
+      prefetch(n0 + BN, cur ^ 1);
+      __pipeline_wait_prior(1);
+    } else {
+      __pipeline_wait_prior(0);
+    }
+
+    // classify: prefix cols obey the band rule ONLY, suffix cols the
+    // staircase ONLY (no v2-style union — a dead col also satisfying the
+    // staircase inequality must stay dead)
+    int last = n0 + BN - 1;
+    bool tail = n0 + BN > N;
+    bool full = !tail && ((last < P && (nodead || last < ds || n0 >= de)) ||
+                          (n0 >= P && last <= startNM + rows_lo));
+    bool empty = (!nodead && n0 >= ds && last < de && last < P) ||
+                 (n0 >= P && n0 > startNM + rows_hi);
+    int tstate = full ? 2 : (empty ? 0 : 1);
+    if (tstate == 0) { __syncthreads(); continue; }
+    __syncthreads();
+
+    for (int job = warp; job < (BMT / 16) * 4; job += V2_THREADS / 32) {
+      int rf = job / 4, nf = job % 4;
+      fragment<accumulator, 16, 16, 16, float> acc;
+      fill_fragment(acc, 0.f);
+      for (int kf = 0; kf < 4; ++kf) {
+        fragment<matrix_a, 16, 16, 16, __nv_bfloat16, row_major> af;
+        fragment<matrix_b, 16, 16, 16, __nv_bfloat16, col_major> bf;
+        load_matrix_sync(af, Qs + rf * 16 * LD + kf * 16, LD);
+        load_matrix_sync(bf, Kt[cur] + nf * 16 * LD + kf * 16, LD);
+        mma_sync(acc, af, bf, acc);
+      }
+      store_matrix_sync(S + rf * 16 * LD + nf * 16, acc, LD, mem_row_major);
+    }
+    __syncthreads();
+
+    {
+      int r = tid / TPR, quart = tid % TPR, c0 = quart * (BN / TPR);
+      int grow = m0 + r;
+      bool row_ok = grow < M;
+
+      float tmax = -FLT_MAX;
+      if (tstate == 2) {
+        for (int c = c0; c < c0 + BN / TPR; ++c) {
+          float val = row_ok ? S[r * LD + c] * scale : -FLT_MAX;
+          S[r * LD + c] = val;
+          tmax = fmaxf(tmax, val);
+        }
+      } else {
+        for (int c = c0; c < c0 + BN / TPR; ++c) {
+          int gc = n0 + c;
+          bool valid = row_ok && gc < N &&
+                       (gc < P ? (gc < ds || gc >= de)
+                               : (gc <= startNM + grow));
+          float val = valid ? S[r * LD + c] * scale : -FLT_MAX;
+          S[r * LD + c] = val;
+          tmax = fmaxf(tmax, val);
+        }
+      }
+      // row max across the row's TPR lanes: xor-butterfly, no barrier
+#pragma unroll
+      for (int off = TPR / 2; off > 0; off >>= 1)
+        tmax = fmaxf(tmax, __shfl_xor_sync(FULL_MASK, tmax, off));
+
+      float m_new = fmaxf(m_run, tmax);
+      float alpha = 1.f, lsum = 0.f;
+      if (row_ok && m_new > -FLT_MAX) {
+        alpha = expf(m_run - m_new);
+        for (int c = c0; c < c0 + BN / TPR; ++c) {
+          float p = expf(S[r * LD + c] - m_new);
+          Pb[r * LD + c] = __float2bfloat16(p);
+          lsum += p;
+        }
+        for (int d = quart * (HEAD_DIM / TPR); d < (quart + 1) * (HEAD_DIM / TPR); ++d)
+          Oa[r * LD + d] *= alpha;
+      } else {
+        for (int c = c0; c < c0 + BN / TPR; ++c) Pb[r * LD + c] = __float2bfloat16(0.f);
+      }
+      // row sum across the same lanes; shuffles run unconditionally so the
+      // butterfly never diverges (masked lanes contribute 0)
+#pragma unroll
+      for (int off = TPR / 2; off > 0; off >>= 1)
+        lsum += __shfl_xor_sync(FULL_MASK, lsum, off);
+      l_run = l_run * alpha + lsum;
+      m_run = m_new;
+    }
+    __syncthreads();
+
+    for (int job = warp; job < (BMT / 16) * 4; job += V2_THREADS / 32) {
+      int rf = job / 4, nf = job % 4;
+      fragment<accumulator, 16, 16, 16, float> acc;
+      load_matrix_sync(acc, Oa + rf * 16 * LD + nf * 16, LD, mem_row_major);
+      for (int kf = 0; kf < 4; ++kf) {
+        fragment<matrix_a, 16, 16, 16, __nv_bfloat16, row_major> af;
+        fragment<matrix_b, 16, 16, 16, __nv_bfloat16, row_major> bf;
+        load_matrix_sync(af, Pb + rf * 16 * LD + kf * 16, LD);
+        load_matrix_sync(bf, Vt[cur] + kf * 16 * LD + nf * 16, LD);
+        mma_sync(acc, af, bf, acc);
+      }
+      store_matrix_sync(Oa + rf * 16 * LD + nf * 16, acc, LD, mem_row_major);
+    }
+    __syncthreads();
+  }
+
+  // write out (B, M, H, D) contiguous: O / l — every lane normalizes and
+  // writes its own HEAD_DIM/TPR slice (l_run is register-replicated per lane)
+  {
+    int r = tid / TPR, quart = tid % TPR, grow = m0 + r;
+    if (grow < M) {
+      float inv = 1.f / l_run;
+      __nv_bfloat16* orow = o + (((size_t)b * M + grow) * H + h) * HEAD_DIM;
+      for (int d = quart * (HEAD_DIM / TPR); d < (quart + 1) * (HEAD_DIM / TPR); ++d)
+        orow[d] = __float2bfloat16(Oa[r * LD + d] * inv);
+    }
+  }
+}
+
 constexpr size_t v2_smem(int bmt) {
   return (size_t)(2 * bmt + 4 * BN) * LD * sizeof(__nv_bfloat16) +
          ((size_t)2 * bmt * LD + 2 * (V2_THREADS / 32) * bmt + 2 * bmt) * sizeof(float);
+}
+
+// v3 keeps no smem stats (register (m,l) + shuffle reductions)
+constexpr size_t v3_smem(int bmt) {
+  return (size_t)(2 * bmt + 4 * BN) * LD * sizeof(__nv_bfloat16) +
+         (size_t)2 * bmt * LD * sizeof(float);
 }
 
 }  // namespace
@@ -383,12 +583,86 @@ torch::Tensor fused_attention(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   return o;
 }
 
+// v3 host: q (B, M, H, 64) / k, v (B, N, H_kv, 64), ANY strides with the
+// head_dim innermost-contiguous and 16B-aligned rows; bf16 only. Returns
+// (B, M, H, 64) contiguous.
+torch::Tensor fused_attention_gqa(torch::Tensor q, torch::Tensor k,
+                                  torch::Tensor v, double scale,
+                                  int64_t prefix_len, int64_t dead_start,
+                                  int64_t dead_end) {
+  TORCH_CHECK(q.is_cuda() && q.dim() == 4 && k.dim() == 4 && v.dim() == 4,
+              "expected 4D CUDA tensors (B, seq, heads, 64)");
+  TORCH_CHECK(q.scalar_type() == torch::kBFloat16 &&
+              k.scalar_type() == torch::kBFloat16 &&
+              v.scalar_type() == torch::kBFloat16, "v3 is bf16-only");
+  TORCH_CHECK(q.size(3) == HEAD_DIM && k.size(3) == HEAD_DIM &&
+              v.size(3) == HEAD_DIM, "head_dim must be 64");
+  TORCH_CHECK(q.stride(3) == 1 && k.stride(3) == 1 && v.stride(3) == 1,
+              "head_dim must be the contiguous dim");
+  int B = q.size(0), M = q.size(1), H = q.size(2);
+  int N = k.size(1), Hkv = k.size(2);
+  TORCH_CHECK(k.size(0) == B && v.size(0) == B && v.size(1) == N &&
+              v.size(2) == Hkv && k.sizes() == v.sizes(), "k/v shape mismatch");
+  TORCH_CHECK(H % Hkv == 0, "query heads must be a multiple of kv heads");
+  // cp.async copies 16B chunks: every row start must be 16B aligned
+  for (auto& t : {q, k, v})
+    TORCH_CHECK((t.stride(0) % 8 == 0) && (t.stride(1) % 8 == 0) &&
+                    (t.stride(2) % 8 == 0) &&
+                    (reinterpret_cast<uintptr_t>(t.data_ptr()) % 16 == 0),
+                "strides/base must keep 16B alignment for cp.async");
+
+  int P = prefix_len >= 0 ? (int)prefix_len : N;
+  TORCH_CHECK(P <= N, "prefix_len exceeds kv length");
+  TORCH_CHECK(0 <= dead_start && dead_start <= dead_end && dead_end <= P,
+              "dead band must satisfy 0 <= ds <= de <= prefix_len");
+
+  auto o = torch::empty({B, M, H, HEAD_DIM}, q.options());
+  float sc = scale > 0 ? (float)scale : 1.f / sqrtf((float)HEAD_DIM);
+  int G = H / Hkv;
+
+  static bool smem_ok3 = [] {
+    bool a = cudaFuncSetAttribute(fused_attention_v3_gqa<32>,
+              cudaFuncAttributeMaxDynamicSharedMemorySize, v3_smem(32)) == cudaSuccess;
+    bool b = cudaFuncSetAttribute(fused_attention_v3_gqa<64>,
+              cudaFuncAttributeMaxDynamicSharedMemorySize, v3_smem(64)) == cudaSuccess;
+    return a && b;
+  }();
+  TORCH_CHECK(smem_ok3, "failed to reserve dynamic smem for v3");
+
+  if (M <= 96) {
+    int tiles_m = (M + 31) / 32;
+    fused_attention_v3_gqa<32><<<B * H * tiles_m, V2_THREADS, v3_smem(32),
+        c10::cuda::getCurrentCUDAStream()>>>(
+        (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
+        (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
+        q.stride(0), q.stride(1), q.stride(2), k.stride(0), k.stride(1),
+        k.stride(2), v.stride(0), v.stride(1), v.stride(2),
+        H, G, tiles_m, M, N, sc, P, (int)dead_start, (int)dead_end);
+  } else {
+    int tiles_m = (M + 63) / 64;
+    fused_attention_v3_gqa<64><<<B * H * tiles_m, V2_THREADS, v3_smem(64),
+        c10::cuda::getCurrentCUDAStream()>>>(
+        (const __nv_bfloat16*)q.data_ptr(), (const __nv_bfloat16*)k.data_ptr(),
+        (const __nv_bfloat16*)v.data_ptr(), (__nv_bfloat16*)o.data_ptr(),
+        q.stride(0), q.stride(1), q.stride(2), k.stride(0), k.stride(1),
+        k.stride(2), v.stride(0), v.stride(1), v.stride(2),
+        H, G, tiles_m, M, N, sc, P, (int)dead_start, (int)dead_end);
+  }
+  cudaError_t err = cudaGetLastError();
+  TORCH_CHECK(err == cudaSuccess, "fused_attention_gqa launch failed: ",
+              cudaGetErrorString(err));
+  return o;
+}
+
 TORCH_LIBRARY_FRAGMENT(vlak, m) {
   m.def("fused_attention(Tensor q, Tensor k, Tensor v, float scale=-1., "
         "Tensor? attn_mask=None, int prefix_len=-1) -> Tensor");
+  m.def("fused_attention_gqa(Tensor q, Tensor k, Tensor v, float scale=-1., "
+        "int prefix_len=-1, int dead_start=0, int dead_end=0) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(vlak, CUDA, m) {
   m.impl("fused_attention", &fused_attention);
+  m.impl("fused_attention_gqa", &fused_attention_gqa);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -397,4 +671,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         pybind11::arg("q"), pybind11::arg("k"), pybind11::arg("v"),
         pybind11::arg("scale") = -1.0, pybind11::arg("attn_mask") = std::nullopt,
         pybind11::arg("prefix_len") = -1);
+  m.def("fused_attention_gqa", &fused_attention_gqa,
+        "GQA-native fused SDPA, (B,seq,heads,64) layouts, analytic mask",
+        pybind11::arg("q"), pybind11::arg("k"), pybind11::arg("v"),
+        pybind11::arg("scale") = -1.0, pybind11::arg("prefix_len") = -1,
+        pybind11::arg("dead_start") = 0, pybind11::arg("dead_end") = 0);
 }

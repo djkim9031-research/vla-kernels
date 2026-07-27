@@ -17,7 +17,8 @@ import torch
 
 from vla.patch_kernels import use_custom_kernels
 
-VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk"]
+VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk",
+            "compiled-vk3"]
 
 
 def _sdpa_flash_first():
@@ -182,6 +183,120 @@ def _route_attention_vlak():
         cls.eager_attention_forward = orig
 
 
+def _analytic_params(m2, M, N):
+    """Solve a captured (M, N) bool mask for the v3 analytic parameters
+    (P, ds, de): visible(r, c) = c < P ? (c < ds or c >= de)
+                                       : c <= (N - M) + r.
+    Returns None unless the analytic form reproduces the mask EXACTLY."""
+    r = torch.arange(M)[:, None]
+    c = torch.arange(N)[None, :]
+    for P in dict.fromkeys([N, N - M]):        # no suffix, then suffix of M
+        if P <= 0:
+            continue
+        pre = m2[:, :P]
+        deadcols = (~pre.any(0)).nonzero().flatten()
+        if len(deadcols):
+            ds, de = int(deadcols.min()), int(deadcols.max()) + 1
+        else:
+            ds = de = 0
+        ana = torch.where(c < P, (c < ds) | (c >= de), c <= (N - M) + r)
+        if torch.equal(ana, m2):
+            return (P, ds, de)
+    return None
+
+
+def _probe_mask_params(policy):
+    """One eager inference with a capturing shim on eager_attention_forward:
+    records each site's (M, N) mask and solves it for analytic parameters.
+    Static-per-task by construction — the language prompt fixes the pad band."""
+    from lerobot.policies.smolvla import smolvlm_with_expert as swe
+    from vla.load_smolvla import dummy_observation
+
+    captured = {}
+    cls = swe.SmolVLMWithExpertModel
+    orig = cls.eager_attention_forward
+
+    def capture(self, attention_mask, batch_size, head_dim,
+                query_states, key_states, value_states):
+        key = (query_states.shape[1], key_states.shape[1])
+        if key not in captured:
+            captured[key] = attention_mask[0].detach().to("cpu", torch.bool)
+        return orig(self, attention_mask, batch_size, head_dim,
+                    query_states, key_states, value_states)
+
+    cls.eager_attention_forward = capture
+    try:
+        with torch.no_grad():
+            base_infer(policy)(dummy_observation(policy))
+    finally:
+        cls.eager_attention_forward = orig
+    return {mn: _analytic_params(m2, *mn) for mn, m2 in captured.items()}
+
+
+@contextlib.contextmanager
+def _route_attention_vlak3(params):
+    """Expert sites -> vlak::fused_attention_gqa (v3).
+
+    v3 consumes the model's own layouts: q (B, M, H, 64) and the UNEXPANDED
+    5-head k/v (B, N, H_kv, 64) at their natural strides, with the probed
+    analytic mask as arithmetic. The whole sdpa entourage disappears at those
+    sites — no GQA expand, no transposes, no contiguous staging, no mask
+    tensor — and (B, M, H, 64) contiguous output makes the final reshape a
+    view. Prefix (M > 96) and any site whose mask defeated the probe fall
+    back to F.sdpa with the explicit expand."""
+    try:
+        from lerobot.policies.smolvla import smolvlm_with_expert as swe
+    except ImportError:
+        yield
+        return
+    import torch.nn.functional as F
+    from kernels.attention import fused_attention_gqa as vlak_gqa
+
+    # warm outside tracing: JIT-build + register before Dynamo sees the op
+    _w = torch.randn(1, 32, 1, 64, device="cuda", dtype=torch.bfloat16)
+    vlak_gqa(_w, _w, _w)
+
+    def routed(self, attention_mask, batch_size, head_dim,
+               query_states, key_states, value_states):
+        M, N = query_states.shape[1], key_states.shape[1]
+        par = params.get((M, N))
+        if (par is not None and M <= 96 and head_dim == 64
+                and query_states.dtype == torch.bfloat16):
+            P, ds, de = par
+            out = vlak_gqa(query_states,
+                           key_states.to(query_states.dtype),
+                           value_states.to(query_states.dtype),
+                           scale=head_dim ** -0.5, prefix_len=P,
+                           dead_start=ds, dead_end=de)
+            return out.reshape(batch_size, M, -1)
+        # fallback: sdpa with explicit GQA expand (prefix + unprobed sites)
+        n_heads = self.num_attention_heads
+        n_kv = self.num_key_value_heads
+        groups = n_heads // n_kv
+        if groups > 1:
+            key_states = key_states[:, :, :, None, :].expand(
+                batch_size, N, n_kv, groups, head_dim).reshape(
+                batch_size, N, n_heads, head_dim)
+            value_states = value_states[:, :, :, None, :].expand(
+                batch_size, N, n_kv, groups, head_dim).reshape(
+                batch_size, N, n_heads, head_dim)
+        q = query_states.transpose(1, 2)
+        k = key_states.to(query_states.dtype).transpose(1, 2)
+        v = value_states.to(query_states.dtype).transpose(1, 2)
+        out = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=attention_mask[:, None],
+            scale=head_dim ** -0.5)
+        return out.transpose(1, 2).reshape(batch_size, -1, n_heads * head_dim)
+
+    cls = swe.SmolVLMWithExpertModel
+    orig = cls.eager_attention_forward
+    cls.eager_attention_forward = routed
+    try:
+        yield
+    finally:
+        cls.eager_attention_forward = orig
+
+
 def _stack(*ctxs):
     es = contextlib.ExitStack()
 
@@ -218,6 +333,11 @@ def make_infer(policy, variant: str):
     if variant == "compiled-vk":   # compiled-ro + vlak attention at expert sites
         return _stack(_sdpa_flash_first(), _vision_mask_none(),
                       _route_attention_vlak()), \
+            torch.compile(base, mode="reduce-overhead")
+    if variant == "compiled-vk3":  # compiled-ro + v3 GQA-native kernel
+        params = _probe_mask_params(policy)
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _route_attention_vlak3(params)), \
             torch.compile(base, mode="reduce-overhead")
     raise ValueError(f"unknown variant {variant!r}")
 
