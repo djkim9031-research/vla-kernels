@@ -38,13 +38,14 @@ rather than microbenchmarks alone.
   `torch.compile(fullgraph=True)`. Nsight counters back every claim.
   → [docs/softmax.md](docs/softmax.md)
 - *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → 73.8 ms
-  (torch.compile + CUDA Graphs) → 54.3 ms (backend fix + sdpa routing,
-  zero kernel code) → **~49.6 ms (4.0×, ~20 Hz) with the v4
-  CUTLASS/CuTe register-pipeline attention kernel replacing sdpa at the
-  160 expert sites** — a strict same-session win over the best library
-  configuration (49.5/49.7 vs 53.1/53.5 ms p50, paired rounds),
-  accuracy retention 0.99996 gate PASS, LoadGen SingleStream p90
-  51.0 ms + Offline 20.1 samples/s VALID. The per-op softmax swap alone
+  (torch.compile + CUDA Graphs) → 54.3 ms (backend fix + sdpa routing) →
+  ~49.6 ms (the v4 CUTLASS/CuTe register-pipeline attention kernel at
+  the 160 expert sites) → **~45 ms (4.4×, ~22 Hz) after fixing the
+  checkpoint's stray-fp32 modules** (cross-attention projections +
+  action-time MLPs loaded fp32, running ~8 ms of sgemm on CUDA cores;
+  cast to bf16 with fp32-accumulating tensor-core GEMMs). Paired
+  same-session A/B −8.8 ms strict; retention 0.99995 gate PASS; LoadGen
+  SingleStream p90 50.9 ms + Offline 21.3 samples/s VALID. The per-op softmax swap alone
   was −3%: fusion granularity, not op substitution, is what survives
   end-to-end.
   → [results/e2e_comparison.md](results/e2e_comparison.md),

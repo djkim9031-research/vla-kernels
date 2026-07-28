@@ -89,7 +89,21 @@ Session hygiene reminder these runs re-taught: verify locked clocks
 (devfreq cur_freq == max) AND a quiet GPU before benching — an unlocked
 day masqueraded as variant regressions twice.
 
-**v4 register-pipeline kernel (compiled-vk4, 2026-07-27): the new default.**
+**Stray-fp32 fix (compiled-vk4x, 2026-07-28): the new default.** A dtype
+census found the checkpoint's freshly initialized modules — the 8
+cross-attention projection blocks (odd expert layers) and both action-time
+MLPs — loaded as fp32 while everything pretrained went bf16. Their ~456
+GEMMs/inference ran as fp32 sgemm on CUDA cores (~8 ms) and forced a
+per-call cast of the cross K/V cache at every expert attention site. The
+fix is a cast context (vla/variants.py: _expert_bf16) — no kernels.
+Paired same-session A/B: **46.0/45.4 vs compiled-vk4 55.0/54.1 ms p50**
+(strict, both rounds, −8.8 ms avg); retention 0.999951 gate PASS; LoadGen
+SS p90 50.9 ms + Offline 21.3/s VALID. Best observed p50: **45.0 ms**.
+Cumulative: eager 198.4 -> ~45 ms = **4.4x, ~22 Hz**. Same disease as the
+eager-attention upcast of Phase D, found the same way: follow the
+fp32-on-CUDA-cores kernels in the profile.
+
+**v4 register-pipeline kernel (compiled-vk4, 2026-07-27):**
 CUTLASS/CuTe rebuild of the v3 op on the SM80 mma atom — S and P stay in
 registers (softmax on the accumulators via lane shuffles; exp(S) -> P by
 a CuTe layout relabeling; LDSM copy atoms for fragments; identity-tensor

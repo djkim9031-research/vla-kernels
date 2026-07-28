@@ -18,7 +18,7 @@ import torch
 from vla.patch_kernels import use_custom_kernels
 
 VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk",
-            "compiled-vk3", "compiled-vk4"]
+            "compiled-vk3", "compiled-vk4", "compiled-vk4x"]
 
 
 def _sdpa_flash_first():
@@ -300,6 +300,47 @@ def _route_attention_vlak3(params, use_v4=False):
         cls.eager_attention_forward = orig
 
 
+@contextlib.contextmanager
+def _expert_bf16(policy):
+    """Cast the checkpoint's stray fp32 modules to bf16.
+
+    The pretrained VLM/expert weights load as bf16, but the freshly
+    initialized modules — the 8 cross-attention projection blocks (odd
+    expert layers) and both action-time MLPs — stay at PyTorch's default
+    fp32. Their ~456 GEMMs per inference run as fp32 sgemm on CUDA cores
+    (~8 ms) and force a per-call cast of the cross K/V cache at every
+    expert attention site. bf16 weights put those GEMMs on tensor cores
+    (fp32 accumulation inside, same story the attention gate already
+    accepted). Pre-hooks cast any still-fp32 inputs at the module
+    boundary; originals are restored on exit."""
+    mods = [policy.model.action_time_mlp_in, policy.model.action_time_mlp_out]
+    lm = policy.model.vlm_with_expert.lm_expert
+    for i, layer in enumerate(lm.layers):
+        if i % 2 == 1:
+            mods.append(layer.self_attn)
+
+    saved, hooks = [], []
+
+    def cast_inputs(_m, args):
+        return tuple(a.to(torch.bfloat16)
+                     if torch.is_tensor(a) and a.is_floating_point()
+                     and a.dtype != torch.bfloat16 else a for a in args)
+
+    for m in mods:
+        for p in list(m.parameters()) + list(m.buffers()):
+            if p.dtype == torch.float32:
+                saved.append((p, p.data))
+                p.data = p.data.to(torch.bfloat16)
+        hooks.append(m.register_forward_pre_hook(cast_inputs))
+    try:
+        yield
+    finally:
+        for h in hooks:
+            h.remove()
+        for p, d in saved:
+            p.data = d
+
+
 def _stack(*ctxs):
     es = contextlib.ExitStack()
 
@@ -346,6 +387,12 @@ def make_infer(policy, variant: str):
         params = _probe_mask_params(policy)
         return _stack(_sdpa_flash_first(), _vision_mask_none(),
                       _route_attention_vlak3(params, use_v4=True)), \
+            torch.compile(base, mode="reduce-overhead")
+    if variant == "compiled-vk4x":  # + stray-fp32 modules cast to bf16
+        params = _probe_mask_params(policy)
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _route_attention_vlak3(params, use_v4=True),
+                      _expert_bf16(policy)), \
             torch.compile(base, mode="reduce-overhead")
     raise ValueError(f"unknown variant {variant!r}")
 
