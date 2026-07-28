@@ -18,7 +18,7 @@ import torch
 from vla.patch_kernels import use_custom_kernels
 
 VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk",
-            "compiled-vk3"]
+            "compiled-vk3", "compiled-vk4"]
 
 
 def _sdpa_flash_first():
@@ -234,7 +234,7 @@ def _probe_mask_params(policy):
 
 
 @contextlib.contextmanager
-def _route_attention_vlak3(params):
+def _route_attention_vlak3(params, use_v4=False):
     """Expert sites -> vlak::fused_attention_gqa (v3).
 
     v3 consumes the model's own layouts: q (B, M, H, 64) and the UNEXPANDED
@@ -250,7 +250,10 @@ def _route_attention_vlak3(params):
         yield
         return
     import torch.nn.functional as F
-    from kernels.attention import fused_attention_gqa as vlak_gqa
+    if use_v4:
+        from kernels.attention import fused_attention_gqa_v4 as vlak_gqa
+    else:
+        from kernels.attention import fused_attention_gqa as vlak_gqa
 
     # warm outside tracing: JIT-build + register before Dynamo sees the op
     _w = torch.randn(1, 32, 1, 64, device="cuda", dtype=torch.bfloat16)
@@ -338,6 +341,11 @@ def make_infer(policy, variant: str):
         params = _probe_mask_params(policy)
         return _stack(_sdpa_flash_first(), _vision_mask_none(),
                       _route_attention_vlak3(params)), \
+            torch.compile(base, mode="reduce-overhead")
+    if variant == "compiled-vk4":  # + v4 register-pipeline kernel (mma.sync)
+        params = _probe_mask_params(policy)
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _route_attention_vlak3(params, use_v4=True)), \
             torch.compile(base, mode="reduce-overhead")
     raise ValueError(f"unknown variant {variant!r}")
 

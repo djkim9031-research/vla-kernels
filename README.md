@@ -25,7 +25,7 @@ rather than microbenchmarks alone.
 | Bench toolkit (correctness/latency/bandwidth, ncu parser, trtexec) | ✅ |
 | SmolVLA harness (load / patch / parity / e2e / LoadGen) | ✅ measured on Thor |
 | Variant comparison: eager · kernel-patch · torch.compile · +CUDA Graphs | ✅ → [results/e2e_comparison.md](results/e2e_comparison.md) |
-| Kernel #2 — fused attention v3 (WMMA, GQA-native, analytic mask) | ✅ **region parity with PyTorch's mem-efficient path inside torch.compile** (21.6 us/call with zero prep kernels vs 19.9 + 2.0 entourage), gate PASS; the expand/cast/transpose entourage is deleted, not fused — plus the documented eager-vs-in-graph and barrier-economics findings → [docs/attention.md](docs/attention.md) |
+| Kernel #2 — fused attention v3/v4 (GQA-native, analytic mask; v4 = CUTLASS/CuTe register pipeline) | ✅ **beats PyTorch's mem-efficient kernel in-graph** (v4: 16.5/18.6 us vs fmha ~19.9, zero prep kernels) and **beats the best compiled variant end-to-end**: 49.5–49.7 vs 53.1–53.5 ms p50, paired same-session A/B, gate PASS → [docs/attention.md](docs/attention.md) |
 | WMMA GEMM · Triton ports · INT8/TRT · C++ deployment | ⏳ roadmap |
 
 **Headlines so far (locked clocks):**
@@ -37,16 +37,16 @@ rather than microbenchmarks alone.
   (`vlak::softmax`), it traces as one node under
   `torch.compile(fullgraph=True)`. Nsight counters back every claim.
   → [docs/softmax.md](docs/softmax.md)
-- *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → 73.8 ms with
-  torch.compile + CUDA Graphs → **54.3 ms (3.65×, 18.4 Hz) after two
-  profiling-driven attention fixes**: an SDPA backend regression (Inductor
-  picked the memory-efficient kernel over flash because a provably all-ones
-  vision mask gets materialized under tracing; −7.9 ms) and routing the
-  model's hand-written fp32 eager attention to F.sdpa (−11.8 ms — the
-  explicit fp32 upcast had been running attention GEMMs on CUDA cores).
-  Accuracy retention 0.99995, gate PASS, zero kernel code. The per-op
-  softmax swap alone is −3%: fusion granularity, not op substitution, is
-  what survives end-to-end.
+- *End-to-end (SmolVLA, 450M, bf16):* eager 198 ms/chunk → 73.8 ms
+  (torch.compile + CUDA Graphs) → 54.3 ms (backend fix + sdpa routing,
+  zero kernel code) → **~49.6 ms (4.0×, ~20 Hz) with the v4
+  CUTLASS/CuTe register-pipeline attention kernel replacing sdpa at the
+  160 expert sites** — a strict same-session win over the best library
+  configuration (49.5/49.7 vs 53.1/53.5 ms p50, paired rounds),
+  accuracy retention 0.99996 gate PASS, LoadGen SingleStream p90
+  51.0 ms + Offline 20.1 samples/s VALID. The per-op softmax swap alone
+  was −3%: fusion granularity, not op substitution, is what survives
+  end-to-end.
   → [results/e2e_comparison.md](results/e2e_comparison.md),
   [results/attention_budget.md](results/attention_budget.md)
 

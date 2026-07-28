@@ -1,0 +1,9 @@
+{
+  "variant": "compiled-vk4",
+  "numerical_parity": {
+    "max_abs_err": 0.0661395788192749,
+    "mse": 0.00012592085113283247,
+    "cosine": 0.9999561905860901,
+    "retention_gate_99": true
+  }
+}

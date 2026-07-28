@@ -188,6 +188,53 @@ same warps, so a 4/4 split doubles each phase and the overlap cannot pay.
 **enable_gqa=True** drops to the fp32 math backend when a mask is present
 (~280 us/call): the GQA read savings are unreachable via stock sdpa.
 
+## v4: the register pipeline (2026-07-27) — the bar falls
+
+v3.2 reached region parity but still paid WMMA's structural tax: opaque
+fragments force the score tile through shared memory (store S, scalar
+softmax, store P, reload) with two extra block barriers per K/V tile. v4
+(`vlak::fused_attention_gqa_v4`, `compiled-vk4`) rebuilds the inner loop
+on **CUTLASS/CuTe** (vendored as a submodule at `third_party/cutlass`),
+using the SM80 mma atom (`SM80_16x8x16_F32BF16BF16F32_TN`) whose
+thread<->element mapping is architecturally defined — a compile probe
+pinned the sm_110 menu first (mma.sync yes; tcgen05 no; wgmma is
+Hopper-only):
+
+- softmax runs ON the accumulator registers: row max/sum via two
+  xor-shuffles among the 4 lanes that share a row (an SM80-atom fact)
+- exp(S) becomes P's A-fragment by a pure CuTe layout relabeling of the
+  same registers (`logical_divide` of the accumulator layout — the C and
+  A fragments share (row, column-pair) ownership)
+- fragment loads go through CuTe LDSM copy atoms (`SM75_U32x4_LDSM_N`
+  for Q/K, the transposing `SM75_U16x8_LDSM_T` for V); mask coordinates
+  come from CuTe identity tensors — no hand-derived lane arithmetic and
+  no inline PTX anywhere in the kernel
+- S and P never touch shared memory; barriers drop to 2 per tile
+  (K/V visibility + buffer protection)
+- 64-thread blocks at ~41 KB smem -> 2 blocks/SM (v3's 100 KB blocks
+  pinned occupancy at 1), giving cross-block latency hiding
+- the TiledMMA carries an N-permutation tile of 16 so B fragments match
+  the LDSM atoms' 8-value granularity (the flash-attention shaping)
+- inherits v3's contracts unchanged: GQA-native, arbitrary strides,
+  (B, M, H, 64) contiguous output, probed analytic mask
+
+Locked-clock results (7 sessions, medians):
+
+| | v3.2 | v4 | fmha kernel (bar) |
+|---|---|---|---|
+| cross (50x241) | 21.2 us | **16.5 us** | ~19.9 |
+| self (50x291) | 26.2 us | **18.6 us** | ~19.9 (avg) |
+
+First kernel-vs-kernel win, on top of the zero-entourage region. End to
+end (paired alternating A/B, same session): compiled-ro 53.1/53.5 ms vs
+**compiled-vk4 49.5/49.7 ms p50** — a strict improvement in both rounds,
+so by the shipping rule compiled-vk4 becomes the default. Retention
+0.999956 gate PASS; LoadGen SingleStream p90 51.0 ms and Offline 20.1
+samples/s, both VALID. Cumulative: eager 198.4 -> ~49.6 ms = **4.0x at
+~20 Hz**. Correctness: full case grid + strided + v3-equivalence +
+compile-composability + 30-trial stress in tests/test_attention_v4.py;
+racecheck/synccheck/memcheck clean.
+
 ## Lessons worth keeping
 
 1. **Measure the real bar.** Unmasked F.sdpa (flash) runs 14–18 µs at these

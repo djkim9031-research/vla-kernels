@@ -35,7 +35,36 @@ def _ext():
     return ext
 
 
+def _cutlass_include():
+    # repo submodule first; CUTLASS_HOME as an override for out-of-tree builds
+    cand = os.environ.get("CUTLASS_HOME")
+    if cand and os.path.isdir(os.path.join(cand, "include")):
+        return os.path.join(cand, "include")
+    repo = os.path.join(_THIS_DIR, "..", "..", "third_party", "cutlass", "include")
+    if os.path.isdir(repo):
+        return os.path.abspath(repo)
+    raise RuntimeError(
+        "CUTLASS headers not found: init the submodule "
+        "(git submodule update --init) or set CUTLASS_HOME")
+
+
+@lru_cache(maxsize=1)
+def _ext_v4():
+    ext = load(
+        name="vlak_attention_v4",
+        sources=[os.path.join(_THIS_DIR, "fused_attention_v4.cu")],
+        extra_include_paths=[_cutlass_include()],
+        extra_cuda_cflags=["-O3", "-arch=native", "--use_fast_math"],
+        verbose=bool(int(os.environ.get("VLAK_VERBOSE", "0"))),
+    )
+    torch.library.register_fake("vlak::fused_attention_gqa_v4")(
+        lambda q, k, v, scale=-1.0, prefix_len=-1, dead_start=0, dead_end=0:
+            torch.empty(q.shape, dtype=q.dtype, device=q.device))
+    return ext
+
+
 _registered = False
+_registered_v4 = False
 
 
 def _ensure_registered():
@@ -43,6 +72,13 @@ def _ensure_registered():
     if not _registered:
         _ext()
         _registered = True
+
+
+def _ensure_registered_v4():
+    global _registered_v4
+    if not _registered_v4:
+        _ext_v4()
+        _registered_v4 = True
 
 
 def fused_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
@@ -80,5 +116,20 @@ def fused_attention_gqa(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
     """
     _ensure_registered()
     return torch.ops.vlak.fused_attention_gqa(
+        q, k, v, -1.0 if scale is None else scale,
+        -1 if prefix_len is None else prefix_len, dead_start, dead_end)
+
+
+def fused_attention_gqa_v4(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                           scale: float | None = None,
+                           prefix_len: int | None = None,
+                           dead_start: int = 0,
+                           dead_end: int = 0) -> torch.Tensor:
+    """v4: register-pipeline GQA attention (mma.sync m16n8k16).
+
+    Same contract as fused_attention_gqa; S and P stay in registers.
+    """
+    _ensure_registered_v4()
+    return torch.ops.vlak.fused_attention_gqa_v4(
         q, k, v, -1.0 if scale is None else scale,
         -1 if prefix_len is None else prefix_len, dead_start, dead_end)

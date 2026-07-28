@@ -89,6 +89,17 @@ Session hygiene reminder these runs re-taught: verify locked clocks
 (devfreq cur_freq == max) AND a quiet GPU before benching — an unlocked
 day masqueraded as variant regressions twice.
 
+**v4 register-pipeline kernel (compiled-vk4, 2026-07-27): the new default.**
+CUTLASS/CuTe rebuild of the v3 op on the SM80 mma atom — S and P stay in
+registers (softmax on the accumulators via lane shuffles; exp(S) -> P by
+a CuTe layout relabeling; LDSM copy atoms for fragments; identity-tensor
+mask coordinates; no inline PTX), 2 barriers/tile, 64-thread blocks at
+2 blocks/SM. Op-level: cross 16.5 us / self 18.6 — beats the fmha kernel
+itself (19.9) with zero entourage. Paired same-session A/B: 49.5/49.7 vs
+compiled-ro 53.1/53.5 ms p50 (strict win, both rounds), gate PASS
+0.999956, LoadGen SS p90 51.0 ms + Offline 20.1/s VALID. Cumulative:
+eager 198.4 -> ~49.6 ms = 4.0x, ~20 Hz.
+
 **Eager→SDPA routing (2026-07-24, Phase D step 3a):** lerobot's expert/prefix
 attention is hand-written (fp32-upcast QK^T → where(mask) → softmax → PV, 176
 sites). Op-level measurement showed F.sdpa 3–6× faster at those shapes; the
