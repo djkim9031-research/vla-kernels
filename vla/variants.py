@@ -18,7 +18,8 @@ import torch
 from vla.patch_kernels import use_custom_kernels
 
 VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk",
-            "compiled-vk3", "compiled-vk4", "compiled-vk4x", "compiled-vk4c"]
+            "compiled-vk3", "compiled-vk4", "compiled-vk4x", "compiled-vk4c",
+            "compiled-vk5"]
 
 
 def _sdpa_flash_first():
@@ -341,6 +342,64 @@ def _expert_bf16(policy):
             p.data = d
 
 
+@contextlib.contextmanager
+def _vision_posids_static():
+    """Assign the vision position ids directly instead of via boolean-mask
+    scatter.
+
+    SmolVLM's vision embeddings do `position_ids[mask] = pos_ids[mask]` to
+    support variable-resolution images; the boolean indexing lowers to
+    aten.nonzero (data-dependent shape), which breaks the Dynamo graph once
+    per camera. For fixed full-resolution cameras the patch mask is all-ones
+    by construction — the third ceremonial-mask incident in this project —
+    so the scatter is the identity and the ids can be assigned directly.
+    The fractional-coordinate computation is kept verbatim so the produced
+    values are unchanged."""
+    try:
+        from transformers.models.smolvlm import modeling_smolvlm as mm
+    except ImportError:
+        yield
+        return
+    cls = mm.SmolVLMVisionEmbeddings
+    orig = cls.forward
+
+    def forward(self, pixel_values, patch_attention_mask):
+        batch_size, _, max_im_h, max_im_w = pixel_values.shape
+        patch_embeds = self.patch_embedding(pixel_values)
+        embeddings = patch_embeds.flatten(2).transpose(1, 2)
+        boundaries = torch.arange(
+            1 / self.num_patches_per_side, 1.0, 1 / self.num_patches_per_side,
+            device=pixel_values.device)
+        nb_patches_h = patch_attention_mask[:, :, 0].sum(dim=1)
+        nb_patches_w = patch_attention_mask[:, 0, :].sum(dim=1)
+        step_h = 1.0 / nb_patches_h
+        step_w = 1.0 / nb_patches_w
+        max_patches_h = patch_attention_mask.size(1)
+        max_patches_w = patch_attention_mask.size(2)
+        h_indices = torch.arange(max_patches_h, device=pixel_values.device,
+                                 dtype=torch.float32)
+        w_indices = torch.arange(max_patches_w, device=pixel_values.device,
+                                 dtype=torch.float32)
+        fractional_coords_h = torch.clamp(h_indices[None, :] * step_h[:, None],
+                                          max=(1.0 - 1e-6))
+        fractional_coords_w = torch.clamp(w_indices[None, :] * step_w[:, None],
+                                          max=(1.0 - 1e-6))
+        bucket_coords_h = torch.bucketize(fractional_coords_h, boundaries,
+                                          right=True)
+        bucket_coords_w = torch.bucketize(fractional_coords_w, boundaries,
+                                          right=True)
+        pos_ids = (bucket_coords_h[:, :, None] * self.num_patches_per_side +
+                   bucket_coords_w[:, None, :]).reshape(batch_size, -1)
+        # all-ones mask -> the original masked scatter IS this assignment
+        return embeddings + self.position_embedding(pos_ids)
+
+    cls.forward = forward
+    try:
+        yield
+    finally:
+        cls.forward = orig
+
+
 def _compact_prefix(policy):
     """Drop the padded-language columns from the prefix at the source.
 
@@ -445,6 +504,14 @@ def make_infer(policy, variant: str):
                       _route_attention_vlak3(params, use_v4=True),
                       _expert_bf16(policy), compact), \
             torch.compile(base, mode="reduce-overhead")
+    if variant == "compiled-vk5":  # + graph-break fixes: ONE graph, enforced
+        compact = _compact_prefix(policy)
+        params = _probe_mask_params(policy)
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _vision_posids_static(),
+                      _route_attention_vlak3(params, use_v4=True),
+                      _expert_bf16(policy), compact), \
+            torch.compile(base, mode="reduce-overhead", fullgraph=True)
     raise ValueError(f"unknown variant {variant!r}")
 
 

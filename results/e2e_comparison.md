@@ -89,7 +89,23 @@ Session hygiene reminder these runs re-taught: verify locked clocks
 (devfreq cur_freq == max) AND a quiet GPU before benching — an unlocked
 day masqueraded as variant regressions twice.
 
-**Padding compaction (compiled-vk4c, 2026-07-28): the new default.** The
+**Graph-break elimination (compiled-vk5, 2026-07-28): the new default,
+and the deployment milestone.** torch._dynamo.explain traced ALL 11
+breaks to one line: SmolVLM's vision embeddings assign position ids via
+boolean-mask scatter (`position_ids[mask] = pos_ids[mask]` -> aten.nonzero
+-> dynamic shape), once per camera. For fixed full-resolution cameras
+that mask is all-ones — the third ceremonial-mask incident — so the
+scatter is the identity; _vision_posids_static assigns directly (the
+fractional-coordinate computation kept verbatim). Result: **ONE graph,
+zero breaks, fullgraph=True enforced** so regressions fail loudly.
+Paired A/B: 39.2/39.2 vs compiled-vk4c 43.3/43.2 ms p50 — strict both
+rounds (−4.1 ms: the CPU gaps plus cross-boundary fusion the split
+graphs forbade). p99 39.5 — single-graph replay is near-deterministic.
+Retention 0.999959 gate PASS; LoadGen SS p90 39.7 ms + Offline 25.4/s
+VALID. The whole-graph property also unblocks torch.export/AOTI/TRT for
+Phase E. Cumulative: eager 198.4 -> ~39.2 ms = **5.1x, ~25 Hz**.
+
+**Padding compaction (compiled-vk4c, 2026-07-28):** The
 44 padded-language columns (census-proven inert: masked as keys
 everywhere, positions cumsum-skip them) are dropped at embed_prefix via
 a probe-captured static index — prefix 241 -> 197, shrinking the encode

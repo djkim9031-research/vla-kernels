@@ -43,11 +43,14 @@ rather than microbenchmarks alone.
   the 160 expert sites) → **~45 ms (4.4×, ~22 Hz) after fixing the
   checkpoint's stray-fp32 modules** (cross-attention projections +
   action-time MLPs loaded fp32, running ~8 ms of sgemm on CUDA cores;
-  cast to bf16 with fp32-accumulating tensor-core GEMMs) → **~43 ms
-  (4.6×, ~23 Hz) with the padded-language columns compacted away**
-  (prefix 241→197, census-proven inert; strict paired win; our kernel
-  drops to 13.9 µs/call in-graph). Retention ≥0.99995 gate PASS at
-  every rung; LoadGen SingleStream + Offline VALID. The per-op softmax swap alone
+  cast to bf16 with fp32-accumulating tensor-core GEMMs) → ~43 ms
+  (padded-language columns compacted away, prefix 241→197) → **~39 ms
+  (5.1×, ~25 Hz) as ONE Dynamo graph, zero breaks, fullgraph
+  enforced** — all 11 breaks traced to a single boolean-mask scatter in
+  the vision embeddings, identity under the fixed-camera all-ones mask.
+  p99 39.5 ms. Retention ≥0.99995 gate PASS at every rung; LoadGen
+  SingleStream p90 39.7 ms + Offline 25.4 samples/s VALID. The
+  single-graph property unblocks torch.export/AOTI/TRT deployment. The per-op softmax swap alone
   was −3%: fusion granularity, not op substitution, is what survives
   end-to-end.
   → [results/e2e_comparison.md](results/e2e_comparison.md),
