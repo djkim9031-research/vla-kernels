@@ -235,6 +235,25 @@ samples/s, both VALID. Cumulative: eager 198.4 -> ~49.6 ms = **4.0x at
 compile-composability + 30-trial stress in tests/test_attention_v4.py;
 racecheck/synccheck/memcheck clean.
 
+### TMA on Thor: probed, working, and measured OUT (2026-07-27)
+
+sm_110 supports TMA — probed end to end: `cuTensorMapEncodeTiled`,
+`cp.async.bulk.tensor.2d`, and the mbarrier transaction pipeline all
+execute correctly (CuTe's arch gate predates Thor and must be admitted
+for device passes; the instructions themselves are fine). A full v4.1
+was built on it: one bulk-tensor instruction per K/V tile via CuTe's
+`SM90_TMA_LOAD_4D`, mbarrier double-buffering, hardware zero-fill for
+tail tiles. Correct (full test grid) — and **slower: 24.6/30.3 µs vs
+v4.0's 16.5/18.7**. TMA boxes land unpadded (128 B row pitch), so every
+ldmatrix read pays bank conflicts that the cp.async path's padded
+staging never did; the issue-count saving TMA offers is negligible here
+because 64 threads already issue the cp.async chunks in parallel,
+hidden behind compute. The proper companion (SWIZZLE_128B + matching
+CuTe swizzle layouts) could at best recover to parity at these tile
+sizes, so v4.0's cp.async + padded smem ships. TMA remains the right
+tool where tiles are large and pipelines deep — noted for the prefix
+site (M=241) and any future GEMM work.
+
 ## Lessons worth keeping
 
 1. **Measure the real bar.** Unmasked F.sdpa (flash) runs 14–18 µs at these
