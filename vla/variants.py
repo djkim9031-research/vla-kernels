@@ -18,7 +18,7 @@ import torch
 from vla.patch_kernels import use_custom_kernels
 
 VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk",
-            "compiled-vk3", "compiled-vk4", "compiled-vk4x"]
+            "compiled-vk3", "compiled-vk4", "compiled-vk4x", "compiled-vk4c"]
 
 
 def _sdpa_flash_first():
@@ -341,6 +341,50 @@ def _expert_bf16(policy):
             p.data = d
 
 
+def _compact_prefix(policy):
+    """Drop the padded-language columns from the prefix at the source.
+
+    The 48-slot language block carries ~44 padding tokens that the mask
+    census proved algebraically inert: masked as keys at every site, and
+    positions come from cumsum(pad_masks)-1 so pads never advance them.
+    Removing them is an identity transform on the outputs, and every
+    downstream computation shrinks (prefix 241 -> ~197: encode GEMMs,
+    K/V cache, prefix attention, and the expert kernel's key lengths).
+
+    STATIC-PER-TASK: the keep-index is captured on the first (eager) call
+    and baked into the compiled graph; a changed task string needs a
+    fresh variant setup. Patch applies immediately (so mask probes see
+    compacted shapes); the returned context unpatches on exit."""
+    model_cls = type(policy.model)
+    orig = model_cls.embed_prefix
+    cache = {}
+
+    def capturing(self, *a, **kw):
+        embs, pad, att = orig(self, *a, **kw)
+        idx = pad[0].bool().nonzero().squeeze(1)
+        cache["idx"] = idx
+        # freeze: from now on the index is a captured constant — no data-
+        # dependent branch survives into the traced graph (no graph break)
+        def frozen(self, *a, **kw):
+            e, p, m = orig(self, *a, **kw)
+            return (e.index_select(1, idx), p.index_select(1, idx),
+                    m.index_select(1, idx))
+        model_cls.embed_prefix = frozen
+        return (embs.index_select(1, idx), pad.index_select(1, idx),
+                att.index_select(1, idx))
+
+    model_cls.embed_prefix = capturing
+
+    @contextlib.contextmanager
+    def ctx():
+        try:
+            yield
+        finally:
+            model_cls.embed_prefix = orig
+
+    return ctx()
+
+
 def _stack(*ctxs):
     es = contextlib.ExitStack()
 
@@ -393,6 +437,13 @@ def make_infer(policy, variant: str):
         return _stack(_sdpa_flash_first(), _vision_mask_none(),
                       _route_attention_vlak3(params, use_v4=True),
                       _expert_bf16(policy)), \
+            torch.compile(base, mode="reduce-overhead")
+    if variant == "compiled-vk4c":  # + padded-language columns compacted away
+        compact = _compact_prefix(policy)   # patch NOW: probe sees new shapes
+        params = _probe_mask_params(policy)
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _route_attention_vlak3(params, use_v4=True),
+                      _expert_bf16(policy), compact), \
             torch.compile(base, mode="reduce-overhead")
     raise ValueError(f"unknown variant {variant!r}")
 

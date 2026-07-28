@@ -43,9 +43,11 @@ rather than microbenchmarks alone.
   the 160 expert sites) → **~45 ms (4.4×, ~22 Hz) after fixing the
   checkpoint's stray-fp32 modules** (cross-attention projections +
   action-time MLPs loaded fp32, running ~8 ms of sgemm on CUDA cores;
-  cast to bf16 with fp32-accumulating tensor-core GEMMs). Paired
-  same-session A/B −8.8 ms strict; retention 0.99995 gate PASS; LoadGen
-  SingleStream p90 50.9 ms + Offline 21.3 samples/s VALID. The per-op softmax swap alone
+  cast to bf16 with fp32-accumulating tensor-core GEMMs) → **~43 ms
+  (4.6×, ~23 Hz) with the padded-language columns compacted away**
+  (prefix 241→197, census-proven inert; strict paired win; our kernel
+  drops to 13.9 µs/call in-graph). Retention ≥0.99995 gate PASS at
+  every rung; LoadGen SingleStream + Offline VALID. The per-op softmax swap alone
   was −3%: fusion granularity, not op substitution, is what survives
   end-to-end.
   → [results/e2e_comparison.md](results/e2e_comparison.md),

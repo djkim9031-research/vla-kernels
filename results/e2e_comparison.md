@@ -89,7 +89,20 @@ Session hygiene reminder these runs re-taught: verify locked clocks
 (devfreq cur_freq == max) AND a quiet GPU before benching — an unlocked
 day masqueraded as variant regressions twice.
 
-**Stray-fp32 fix (compiled-vk4x, 2026-07-28): the new default.** A dtype
+**Padding compaction (compiled-vk4c, 2026-07-28): the new default.** The
+44 padded-language columns (census-proven inert: masked as keys
+everywhere, positions cumsum-skip them) are dropped at embed_prefix via
+a probe-captured static index — prefix 241 -> 197, shrinking the encode
+GEMMs, the K/V cache, and the expert kernel's key lengths (cross 197,
+self 247; our v4 now averages 13.9 us/call in-graph). Paired A/B:
+42.7/43.1 vs compiled-vk4x 43.7/43.6 ms p50 — strict both rounds
+(-0.7 ms; the old -3-5 ms estimate predated vk4x, which had already
+removed the prefix's fp32 costs). Retention 0.999954-0.999959 gate PASS.
+Static-per-task: a changed instruction re-probes at variant setup.
+Best observed p50: **42.7 ms**. Cumulative: eager 198.4 -> ~43 ms =
+**4.6x, ~23 Hz**.
+
+**Stray-fp32 fix (compiled-vk4x, 2026-07-28):** A dtype
 census found the checkpoint's freshly initialized modules — the 8
 cross-attention projection blocks (odd expert layers) and both action-time
 MLPs — loaded as fp32 while everything pretrained went bf16. Their ~456
