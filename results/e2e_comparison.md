@@ -89,6 +89,25 @@ Session hygiene reminder these runs re-taught: verify locked clocks
 (devfreq cur_freq == max) AND a quiet GPU before benching — an unlocked
 day masqueraded as variant regressions twice.
 
+**fp32 timestep embedding (compiled-vk7, 2026-07-30): the new default,
+~36.0 ms.** Found by ncu + kernel-time attribution on compiled-vk5: 9% of
+the inference (8-10 kernels x ~340 us) was the flow loop's sinusoidal
+timestep embedding running in FLOAT64 — lerobot's get_safe_dtype only
+downgrades float64 on mps/xpu/cpu, so on CUDA every denoising step paid
+fp64 linspace/pow/sin/cos on Thor's 1/32-rate fp64 pipe, then cast the
+result to bf16 one line later. The _sinusoid_fp32 context computes the
+embedding in fp32 — bit-identical after the bf16 cast (23 mantissa bits
+vs bf16's 8). Gate PASS at the bf16 noise floor: cosine 0.999959,
+joint_worst_rel 0.0635 (hardened per-joint gate, bar 0.12). Paired
+same-session A/B: **36.03/35.98 vs compiled-vk5 40.53/39.25 ms p50**
+(strict, both rounds, −3.3 ms vs the warm round); p99 36.4; ~27.8 Hz;
+LoadGen SS p90 37.66 ms VALID. The fp64 kernels are absent from the vk7
+profile (device time 38.5 → 35.3 ms/call). For scale: this puts the torch
+pipeline AHEAD of a TensorRT 10.13 bf16 engine of the stock model
+(median 36.45 ms), which fails the same per-joint gate at 0.40. Third
+instance of the campaign's oldest lesson: the cheapest milliseconds come
+from dtype defaults, not new kernels.
+
 **Graph-break elimination (compiled-vk5, 2026-07-28): the new default,
 and the deployment milestone.** torch._dynamo.explain traced ALL 11
 breaks to one line: SmolVLM's vision embeddings assign position ids via

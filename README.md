@@ -48,9 +48,17 @@ rather than microbenchmarks alone.
   (5.1×, ~25 Hz) as ONE Dynamo graph, zero breaks, fullgraph
   enforced** — all 11 breaks traced to a single boolean-mask scatter in
   the vision embeddings, identity under the fixed-camera all-ones mask.
-  p99 39.5 ms. Retention ≥0.99995 gate PASS at every rung; LoadGen
-  SingleStream p90 39.7 ms + Offline 25.4 samples/s VALID. The
-  single-graph property unblocks torch.export/AOTI/TRT deployment. The per-op softmax swap alone
+  p99 39.5 ms → **~36.0 ms (5.5×, ~28 Hz) after computing the
+  flow loop's timestep embedding in fp32** — lerobot runs it in float64
+  on CUDA (its dtype guard only downgrades for mps/xpu/cpu) and casts to
+  bf16 one line later; Thor executes fp64 at 1/32 rate, so ten denoising
+  steps paid ~3.4 ms for discarded precision. Found with Nsight Compute
+  + kernel-time attribution; fp32 is bit-identical after the cast (gate
+  at the bf16 noise floor). Retention ≥0.99995 gate PASS at every rung;
+  LoadGen SingleStream p90 37.7 ms VALID. The single-graph property
+  unblocks torch.export/AOTI/TRT deployment — and the torch pipeline now
+  measures AHEAD of a TensorRT 10.13 bf16 engine of the stock model
+  (36.0 vs 36.45 ms median) at ~7× tighter per-joint fidelity. The per-op softmax swap alone
   was −3%: fusion granularity, not op substitution, is what survives
   end-to-end.
   → [results/e2e_comparison.md](results/e2e_comparison.md),

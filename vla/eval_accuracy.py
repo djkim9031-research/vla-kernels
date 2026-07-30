@@ -55,11 +55,21 @@ def numerical_parity(policy, variant: str, n: int = 16, seed: int = 0):
     b, t = torch.stack(ref), torch.stack(out)
     cos = torch.nn.functional.cosine_similarity(
         b.flatten(1), t.flatten(1), dim=1).mean().item()
+    # per-joint deviation: cosine can stay high while one action dimension
+    # drifts (the failure mode quantization-class changes introduce). Report
+    # each joint's worst deviation in units of that joint's motion scale.
+    diff = (b - t).abs()
+    jmax = diff.reshape(-1, diff.shape[-1]).amax(0)
+    jstd = b.reshape(-1, b.shape[-1]).std(0).clamp_min(1e-6)
+    jrel = jmax / jstd
     return {
         "max_abs_err": (b - t).abs().max().item(),
         "mse": ((b - t) ** 2).mean().item(),
         "cosine": cos,
         "retention_gate_99": bool(cos >= 0.99),
+        "joint_max_abs": [round(v, 6) for v in jmax.tolist()],
+        "joint_max_rel": [round(v, 6) for v in jrel.tolist()],
+        "joint_worst_rel": jrel.max().item(),
     }
 
 
@@ -70,6 +80,10 @@ def main():
                     help="sim episodes for task success rate (0 = skip; roadmap)")
     ap.add_argument("--out", default="")
     ap.add_argument("--baseline", default="", help="baseline json to diff against")
+    ap.add_argument("--joint-tol", type=float, default=0.0,
+                    help="per-joint gate: worst joint deviation (in units of "
+                         "that joint's motion std) must stay below this; 0 = "
+                         "report only")
     args = ap.parse_args()
 
     policy = load_policy()
@@ -86,6 +100,9 @@ def main():
         p = result["numerical_parity"]
         print(f"\n[gate] cosine {p['cosine']:.6f} -> "
               f"{'PASS' if p['retention_gate_99'] else 'FAIL'} (>=0.99 proxy)")
+        print(f"[gate] joint_worst_rel {p['joint_worst_rel']:.4f}"
+              + (f" -> {'PASS' if p['joint_worst_rel'] <= args.joint_tol else 'FAIL'}"
+                 f" (<= {args.joint_tol})" if args.joint_tol > 0 else " (report only)"))
 
 
 if __name__ == "__main__":

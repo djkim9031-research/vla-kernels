@@ -19,7 +19,7 @@ from vla.patch_kernels import use_custom_kernels
 
 VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk",
             "compiled-vk3", "compiled-vk4", "compiled-vk4x", "compiled-vk4c",
-            "compiled-vk5"]
+            "compiled-vk5", "compiled-vk7"]
 
 
 def _sdpa_flash_first():
@@ -444,6 +444,27 @@ def _compact_prefix(policy):
     return ctx()
 
 
+@contextlib.contextmanager
+def _sinusoid_fp32():
+    """Compute the flow-loop timestep embedding in fp32 instead of fp64.
+
+    lerobot's create_sinusoidal_pos_embedding asks get_safe_dtype for
+    float64, which only downgrades on mps/xpu/cpu — on CUDA the embedding
+    runs fp64 linspace/pow/sin/cos every flow step, then line 750 casts the
+    result to bf16. Thor executes fp64 at 1/32 rate: ~340 us per step,
+    ~3.4 ms per inference, for precision the very next line discards.
+    fp32 transcendentals are bit-identical after the bf16 cast (23 mantissa
+    bits vs bf16's 8)."""
+    from lerobot.policies.smolvla import modeling_smolvla as _m
+    orig = _m.get_safe_dtype
+    _m.get_safe_dtype = lambda dtype, device: (
+        torch.float32 if dtype == torch.float64 else orig(dtype, device))
+    try:
+        yield
+    finally:
+        _m.get_safe_dtype = orig
+
+
 def _stack(*ctxs):
     es = contextlib.ExitStack()
 
@@ -509,6 +530,14 @@ def make_infer(policy, variant: str):
         params = _probe_mask_params(policy)
         return _stack(_sdpa_flash_first(), _vision_mask_none(),
                       _vision_posids_static(),
+                      _route_attention_vlak3(params, use_v4=True),
+                      _expert_bf16(policy), compact), \
+            torch.compile(base, mode="reduce-overhead", fullgraph=True)
+    if variant == "compiled-vk7":  # vk5 + fp32 timestep embedding (fp64 fix)
+        compact = _compact_prefix(policy)
+        params = _probe_mask_params(policy)
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _vision_posids_static(), _sinusoid_fp32(),
                       _route_attention_vlak3(params, use_v4=True),
                       _expert_bf16(policy), compact), \
             torch.compile(base, mode="reduce-overhead", fullgraph=True)
