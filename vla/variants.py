@@ -19,7 +19,7 @@ from vla.patch_kernels import use_custom_kernels
 
 VARIANTS = ["original", "tuned", "compiled", "compiled-ro", "compiled-vk",
             "compiled-vk3", "compiled-vk4", "compiled-vk4x", "compiled-vk4c",
-            "compiled-vk5", "compiled-vk7"]
+            "compiled-vk5", "compiled-vk7", "compiled-vk7s"]
 
 
 def _sdpa_flash_first():
@@ -251,7 +251,9 @@ def _route_attention_vlak3(params, use_v4=False):
         yield
         return
     import torch.nn.functional as F
-    if use_v4:
+    if use_v4 == "v4s":
+        from kernels.attention import fused_attention_gqa_v4s as vlak_gqa
+    elif use_v4:
         from kernels.attention import fused_attention_gqa_v4 as vlak_gqa
     else:
         from kernels.attention import fused_attention_gqa as vlak_gqa
@@ -539,6 +541,14 @@ def make_infer(policy, variant: str):
         return _stack(_sdpa_flash_first(), _vision_mask_none(),
                       _vision_posids_static(), _sinusoid_fp32(),
                       _route_attention_vlak3(params, use_v4=True),
+                      _expert_bf16(policy), compact), \
+            torch.compile(base, mode="reduce-overhead", fullgraph=True)
+    if variant == "compiled-vk7s":  # vk7 with the swizzled-smem attention
+        compact = _compact_prefix(policy)
+        params = _probe_mask_params(policy)
+        return _stack(_sdpa_flash_first(), _vision_mask_none(),
+                      _vision_posids_static(), _sinusoid_fp32(),
+                      _route_attention_vlak3(params, use_v4="v4s"),
                       _expert_bf16(policy), compact), \
             torch.compile(base, mode="reduce-overhead", fullgraph=True)
     raise ValueError(f"unknown variant {variant!r}")

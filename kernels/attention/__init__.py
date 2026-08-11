@@ -63,8 +63,24 @@ def _ext_v4():
     return ext
 
 
+@lru_cache(maxsize=1)
+def _ext_v4s():
+    ext = load(
+        name="vlak_attention_v4s",
+        sources=[os.path.join(_THIS_DIR, "fused_attention_v4s.cu")],
+        extra_include_paths=[_cutlass_include()],
+        extra_cuda_cflags=["-O3", "-arch=native", "--use_fast_math"],
+        verbose=bool(int(os.environ.get("VLAK_VERBOSE", "0"))),
+    )
+    torch.library.register_fake("vlak::fused_attention_gqa_v4s")(
+        lambda q, k, v, scale=-1.0, prefix_len=-1, dead_start=0, dead_end=0:
+            torch.empty(q.shape, dtype=q.dtype, device=q.device))
+    return ext
+
+
 _registered = False
 _registered_v4 = False
+_registered_v4s = False
 
 
 def _ensure_registered():
@@ -79,6 +95,13 @@ def _ensure_registered_v4():
     if not _registered_v4:
         _ext_v4()
         _registered_v4 = True
+
+
+def _ensure_registered_v4s():
+    global _registered_v4s
+    if not _registered_v4s:
+        _ext_v4s()
+        _registered_v4s = True
 
 
 def fused_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
@@ -131,5 +154,21 @@ def fused_attention_gqa_v4(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
     """
     _ensure_registered_v4()
     return torch.ops.vlak.fused_attention_gqa_v4(
+        q, k, v, -1.0 if scale is None else scale,
+        -1 if prefix_len is None else prefix_len, dead_start, dead_end)
+
+
+def fused_attention_gqa_v4s(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                            scale: float | None = None,
+                            prefix_len: int | None = None,
+                            dead_start: int = 0,
+                            dead_end: int = 0) -> torch.Tensor:
+    """v4s: v4 with swizzled dense smem in place of padded rows.
+
+    Same contract and (bit-identical) results as fused_attention_gqa_v4;
+    only the shared-memory addressing differs.
+    """
+    _ensure_registered_v4s()
+    return torch.ops.vlak.fused_attention_gqa_v4s(
         q, k, v, -1.0 if scale is None else scale,
         -1 if prefix_len is None else prefix_len, dead_start, dead_end)

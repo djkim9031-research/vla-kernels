@@ -254,6 +254,47 @@ sizes, so v4.0's cp.async + padded smem ships. TMA remains the right
 tool where tiles are large and pipelines deep — noted for the prefix
 site (M=241) and any future GEMM work.
 
+## v4s: swizzle instead of padding (2026-08-11) — parity, ships as default
+
+v4 spaces smem rows at 72 elements (144 B = 16 B x 9, odd) so ldmatrix's
+8-row reads land on 8 distinct bank arcs; the 8 pad elements per row are
+dead bytes (12.5% of the staging footprint). v4s
+(`vlak::fused_attention_gqa_v4s`, `compiled-vk7s`) answers whether that
+padding was the right call: rows stored dense (64 elements = one full
+128 B bank row) with `Swizzle<3,3,3>` composed over every smem layout —
+the three row bits XOR into the 16 B-chunk bits, same conflict-freedom,
+zero dead bytes. Writers (cp.async staging) and readers (LDSM
+partitioning) address through the same composed layout objects; the
+warp's Q slice comes from `local_tile` of the whole swizzled tensor (a
+raw pointer offset would break the XOR pattern). Shared memory drops
+41.6 KB -> 36.9 KB per block. Everything else is v4 unchanged.
+
+**Verification.** Same atoms, same accumulation order -> the oracle is
+bit-exact equality with v4, a stronger check than tolerance parity:
+`torch.equal` across the full case grid, tail shapes, unmasked, and
+strided views (tests/test_attention_v4s.py). All bit-identical.
+
+**Numbers** (locked clocks; kernel: 7 reps x 200 iters, order alternated;
+e2e: warm paired rounds, both orders):
+
+| | v4 (padded) | v4s (swizzled) |
+|---|---|---|
+| cross 50x241 | 16.52 us | 16.37 us |
+| self 50x291 | 18.48 us | 18.47 us |
+| e2e p50, round 1 | 36.231 ms | 36.230 ms |
+| e2e p50, round 2 | 36.240 ms | 36.149 ms |
+| accuracy gate | — | cosine 0.999947, joint_worst_rel 0.0562, PASS |
+
+**Verdict: parity.** Both bank cures are exactly equivalent at these tile
+sizes — the swizzle's XORs and the padding's dead bytes are both invisible
+next to the mma/softmax work, and the 4.7 KB smem saving cannot buy a
+third resident block under `__launch_bounds__(64, 2)`. The swizzled
+version ships as the default (`compiled-vk7s`) on two forward-looking
+grounds: dense storage is the shape TMA's SWIZZLE_128B mode needs if the
+bulk-tensor path is ever revisited, and the freed smem is headroom for
+larger K/V tiles. v4 stays in the tree; the two kernels cross-check each
+other bit-for-bit in CI.
+
 ## Lessons worth keeping
 
 1. **Measure the real bar.** Unmasked F.sdpa (flash) runs 14–18 µs at these

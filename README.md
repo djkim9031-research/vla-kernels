@@ -25,7 +25,7 @@ rather than microbenchmarks alone.
 | Bench toolkit (correctness/latency/bandwidth, ncu parser, trtexec) | ✅ |
 | SmolVLA harness (load / patch / parity / e2e / LoadGen) | ✅ measured on Thor |
 | Variant comparison: eager · kernel-patch · torch.compile · +CUDA Graphs | ✅ → [results/e2e_comparison.md](results/e2e_comparison.md) |
-| Kernel #2 — fused attention v3/v4 (GQA-native, analytic mask; v4 = CUTLASS/CuTe register pipeline) | ✅ **beats PyTorch's mem-efficient kernel in-graph** (v4: 16.5/18.6 us vs fmha ~19.9, zero prep kernels) and **beats the best compiled variant end-to-end**: 49.5–49.7 vs 53.1–53.5 ms p50, paired same-session A/B, gate PASS → [docs/attention.md](docs/attention.md) |
+| Kernel #2 — fused attention v3/v4/v4s (GQA-native, analytic mask; v4 = CUTLASS/CuTe register pipeline, v4s = swizzled dense smem, ships as default) | ✅ **beats PyTorch's mem-efficient kernel in-graph** (v4: 16.5/18.6 us vs fmha ~19.9, zero prep kernels) and **beats the best compiled variant end-to-end**: 49.5–49.7 vs 53.1–53.5 ms p50, paired same-session A/B, gate PASS → [docs/attention.md](docs/attention.md) |
 | WMMA GEMM · Triton ports · INT8/TRT · C++ deployment | ⏳ roadmap |
 
 **Headlines so far (locked clocks):**
@@ -58,7 +58,11 @@ rather than microbenchmarks alone.
   LoadGen SingleStream p90 37.7 ms VALID. The single-graph property
   unblocks torch.export/AOTI/TRT deployment — and the torch pipeline now
   measures AHEAD of a TensorRT 10.13 bf16 engine of the stock model
-  (36.0 vs 36.45 ms median) at ~7× tighter per-joint fidelity. The per-op softmax swap alone
+  (36.0 vs 36.45 ms median) at ~7× tighter per-joint fidelity. The
+  shipping stack (`compiled-vk7s`) now serves attention from the
+  swizzled-smem v4s kernel — bit-identical to v4 and parity-verified at
+  kernel and model level (padding vs swizzle: two equivalent bank cures,
+  docs/attention.md). The per-op softmax swap alone
   was −3%: fusion granularity, not op substitution, is what survives
   end-to-end.
   → [results/e2e_comparison.md](results/e2e_comparison.md),
